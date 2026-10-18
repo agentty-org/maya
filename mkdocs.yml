@@ -1,7 +1,7 @@
 site_name: maya
 site_description: A C++26 TUI framework — compile-time type-safe DSL, Yoga flexbox layout, reactive signals, an Elm-style runtime, and a SIMD cell-diff renderer.
 site_url: https://1ay1.github.io/maya/
-repo_url: https://github.com/1ay1/maya
+repo_url: https://github.com/agentty-org/maya
 repo_name: 1ay1/maya
 edit_uri: edit/master/docs/
 docs_dir: docs

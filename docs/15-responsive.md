@@ -229,7 +229,7 @@ the front at a third is bespoke behavior — that is what
 [`responsive`](#responsive-named-width-breakpoints) are for. The grid stays
 a one-number tool on purpose.
 
-See [`examples/grid.cpp`](https://github.com/1ay1/maya/blob/master/examples/grid.cpp)
+See [`examples/grid.cpp`](https://github.com/agentty-org/maya/blob/master/examples/grid.cpp)
 for the complete dashboard — resize it and watch all three shapes.
 
 ---

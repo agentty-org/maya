@@ -381,7 +381,7 @@ to get the lifetime bookkeeping right by hand:
 
 The claim "we got the lifetime bookkeeping right" is not asserted — it is
 **proven at runtime**, on every CI run, by an AddressSanitizer + UBSan gate.
-[`test_signal.cpp`](https://github.com/1ay1/maya/blob/master/tests/test_signal.cpp)
+[`test_signal.cpp`](https://github.com/agentty-org/maya/blob/master/tests/test_signal.cpp)
 contains explicit adversarial lifetime cases:
 
 - `test_computed_destroyed_before_signal` — drop a derived node while its
