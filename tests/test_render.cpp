@@ -11,6 +11,18 @@
 #include <string>
 #include <vector>
 
+#if defined(_WIN32)
+namespace {
+// The writer test needs a writable sink it can open and close around the
+// flush. POSIX names /dev/null; windows names NUL, and the Writer takes a
+// NativeHandle (HANDLE here, not an fd), so the open is CreateFileW.
+[[nodiscard]] maya::platform::NativeHandle open_null_sink() noexcept {
+    return ::CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_WRITE, nullptr,
+                         OPEN_EXISTING, 0, nullptr);
+}
+}  // namespace
+#endif
+
 using namespace maya;
 using namespace maya::detail;
 using namespace maya::dsl;
@@ -323,9 +335,14 @@ TEST_CASE("style transition") {
 // ============================================================================
 TEST_CASE("writer") {
     std::println("--- test_writer ---");
-    // Write to /dev/null to test the pipeline doesn't crash
+    // Write to the null device to test the pipeline doesn't crash
+#if defined(_WIN32)
+    const auto fd = open_null_sink();
+    assert(fd != maya::platform::invalid_handle);
+#else
     int fd = ::open("/dev/null", O_WRONLY);
     assert(fd >= 0);
+#endif
     Writer w(fd);
     w.push(render_op::CursorHide{});
     w.push(render_op::Write{"hello"});
@@ -333,7 +350,11 @@ TEST_CASE("writer") {
     w.push(render_op::StyleStr{"\x1b[1m"});
     w.push(render_op::CursorShow{});
     auto status = w.flush();
+#if defined(_WIN32)
+    ::CloseHandle(fd);
+#else
     ::close(fd);
+#endif
     assert(status.has_value());
     std::println("PASS\n");
 }

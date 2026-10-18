@@ -214,6 +214,9 @@ TEST_CASE("commonmark_spec") {
         std::printf("%-34s %4d/%-4d  %5.1f%%\n", name.c_str(),
                     pt.first, pt.second,
                     pt.second ? 100.0 * pt.first / pt.second : 0.0);
+        std::fflush(stdout);   // localize: the crash looked like it was IN the
+                               // table print; with this, the last flushed row
+                               // names the section that kills the process
     }
 
     double rate = total ? 100.0 * pass / total : 0.0;

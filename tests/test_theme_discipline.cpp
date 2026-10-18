@@ -658,9 +658,33 @@ Color runtime_colour();
 #else
         const std::string sysroot = " ";
 #endif
-        const std::string cmd = "\"" + cxx.string() + "\"" + sysroot + "-std=c++26 "
-                              + "-fsyntax-only -I \"" + inc.string() + "\" \""
-                              + tu.string() + "\" 2>/dev/null";
+        // 2>/dev/null is a shell redirection; cmd.exe has no /dev/null, and
+        // std::system on windows runs cmd — the probe would fail for a
+        // syntax reason that has nothing to do with the type system under
+        // test. NUL is the same device on windows.
+#if defined(_WIN32)
+        const std::string nullsink = "2>NUL";
+#else
+        const std::string nullsink = "2>/dev/null";
+#endif
+#if defined(_WIN32)
+        // std::system runs `cmd /c <string>`. A string that STARTS with a
+        // quote trips cmd's /C quote handling: it strips the outer pair and
+        // then treats "C:\...\clang++.exe" as a quoted spec it cannot parse
+        // after the second pair closes — every probe "fails" without the
+        // compiler ever running. The known-good shape for cmd is the whole
+        // command wrapped in ONE extra outer quote pair (what cmd /S exists
+        // for); every inner path keeps its quotes and forward slashes keep
+        // the C++ string escapes readable.
+        const std::string inner = "\"" + cxx.string() + "\"" + sysroot
+                                + "-std=c++26 -fsyntax-only -I \"" + inc.string()
+                                + "\" \"" + tu.string() + "\" " + nullsink;
+        const std::string cmd = "\"" + inner + "\"";
+#else
+        const std::string cmd = "\"" + cxx.string() + "\"" + sysroot
+                              + "-std=c++26 -fsyntax-only -I \"" + inc.string()
+                              + "\" \"" + tu.string() + "\" " + nullsink;
+#endif
         const bool compiled = std::system(cmd.c_str()) == 0;
         ++checked;
 

@@ -7,6 +7,24 @@
 #include "agtest.hpp"
 #include <cstdlib>   // setenv / unsetenv (tmux sync-detection test)
 #include <print>
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+namespace {
+// The tmux sync-detection test fabricates an environment per case. POSIX
+// setenv/unsetenv; the CRT's _putenv_s has the same contract (name, value,
+// replace) and an empty value drops the variable for getenv.
+void set_env(const char* k, const char* v, int) noexcept { (void)_putenv_s(k, v); }
+void unset_env(const char* k) noexcept { (void)_putenv_s(k, ""); }
+}  // namespace
+#else
+namespace {
+void set_env(const char* k, const char* v, int replace) noexcept { ::setenv(k, v, replace); }
+void unset_env(const char* k) noexcept { ::unsetenv(k); }
+}  // namespace
+#endif
 
 using namespace maya;
 
@@ -261,59 +279,59 @@ TEST_CASE("sync detect tmux") {
                               "TERM", "COLORTERM", "TMUX",
                               "MAYA_TMUX_FEATURES", "MAYA_TMUX_PASSTHROUGH",
                               "MAYA_TMUX_GET_CLIPBOARD"})
-            ::unsetenv(v);
+            unset_env(v);
         // Inside tmux the sync answer now comes from maya::tmux, which
         // probes the LIVE server. Force the fabricated-env path so these
         // cases never depend on the developer's own tmux config, and drop
         // the memoised probe between cases.
-        ::setenv("MAYA_TMUX_FAKE", "1", 1);
+        set_env("MAYA_TMUX_FAKE", "1", 1);
         maya::tmux::reset_cache_for_test();
     };
 
     // Modern tmux (3.4+) reporting its own version → sync supported.
     clear_env();
-    ::setenv("TMUX", "/tmp/tmux-1000/default,1,0", 1);
-    ::setenv("TERM", "tmux-256color", 1);
-    ::setenv("TERM_PROGRAM", "tmux", 1);
-    ::setenv("TERM_PROGRAM_VERSION", "3.7b", 1);
-    ::setenv("MAYA_TMUX_PASSTHROUGH", "1", 1);
+    set_env("TMUX", "/tmp/tmux-1000/default,1,0", 1);
+    set_env("TERM", "tmux-256color", 1);
+    set_env("TERM_PROGRAM", "tmux", 1);
+    set_env("TERM_PROGRAM_VERSION", "3.7b", 1);
+    set_env("MAYA_TMUX_PASSTHROUGH", "1", 1);
     maya::tmux::reset_cache_for_test();
     assert(ansi::env_supports_synchronized_output()
            && "tmux 3.7 with passthrough must report sync-capable");
 
     // tmux 3.4 exactly is the cutoff → supported.
-    ::setenv("TERM_PROGRAM_VERSION", "3.4", 1);
+    set_env("TERM_PROGRAM_VERSION", "3.4", 1);
     assert(ansi::env_supports_synchronized_output()
            && "tmux 3.4 with passthrough must report sync-capable");
 
     // Old tmux (3.2) with no truecolor signal → not supported.
     clear_env();
-    ::setenv("TMUX", "/tmp/tmux-1000/default,1,0", 1);
-    ::setenv("TERM", "tmux-256color", 1);
-    ::setenv("TERM_PROGRAM", "tmux", 1);
-    ::setenv("TERM_PROGRAM_VERSION", "3.2a", 1);
+    set_env("TMUX", "/tmp/tmux-1000/default,1,0", 1);
+    set_env("TERM", "tmux-256color", 1);
+    set_env("TERM_PROGRAM", "tmux", 1);
+    set_env("TERM_PROGRAM_VERSION", "3.2a", 1);
     // NEW CONTRACT: inside tmux the version is irrelevant — what matters
     // is whether tmux will FORWARD the markers (allow-passthrough). A raw
     // CSI ?2026 is swallowed by tmux regardless of its version, so
     // "passthrough off" is the only correct "no sync" answer.
     assert(!ansi::env_supports_synchronized_output()
            && "tmux without passthrough must NOT report sync-capable");
-    ::setenv("MAYA_TMUX_PASSTHROUGH", "1", 1);
+    set_env("MAYA_TMUX_PASSTHROUGH", "1", 1);
     maya::tmux::reset_cache_for_test();
     assert(ansi::env_supports_synchronized_output()
            && "tmux WITH passthrough must report sync-capable");
-    ::unsetenv("MAYA_TMUX_PASSTHROUGH");
+    unset_env("MAYA_TMUX_PASSTHROUGH");
     maya::tmux::reset_cache_for_test();
 
     // Old/unknown-version multiplexer but COLORTERM=truecolor survives
     // (modern outer terminal) → treat as supported.
     clear_env();
-    ::setenv("TMUX", "/tmp/tmux-1000/default,1,0", 1);
-    ::setenv("TERM", "screen-256color", 1);
-    ::setenv("COLORTERM", "truecolor", 1);
+    set_env("TMUX", "/tmp/tmux-1000/default,1,0", 1);
+    set_env("TERM", "screen-256color", 1);
+    set_env("COLORTERM", "truecolor", 1);
     // Under the new contract COLORTERM can't rescue a multiplexer that
     // won't forward the markers — passthrough is the deciding fact.
-    ::setenv("MAYA_TMUX_PASSTHROUGH", "1", 1);
+    set_env("MAYA_TMUX_PASSTHROUGH", "1", 1);
     maya::tmux::reset_cache_for_test();
     assert(ansi::env_supports_synchronized_output()
            && "multiplexer WITH passthrough must report sync-capable");
@@ -321,20 +339,20 @@ TEST_CASE("sync detect tmux") {
     // GNU screen, no version, no truecolor → not supported (screen never
     // forwards 2026).
     clear_env();
-    ::setenv("TERM", "screen", 1);
+    set_env("TERM", "screen", 1);
     assert(!ansi::env_supports_synchronized_output()
            && "bare GNU screen must NOT report sync-capable");
 
     // Explicit override still wins inside a multiplexer.
     clear_env();
-    ::setenv("TMUX", "/tmp/tmux-1000/default,1,0", 1);
-    ::setenv("TERM", "tmux-256color", 1);
-    ::setenv("TERM_PROGRAM", "tmux", 1);
-    ::setenv("TERM_PROGRAM_VERSION", "3.7b", 1);
-    ::setenv("MAYA_NO_SYNC", "1", 1);
+    set_env("TMUX", "/tmp/tmux-1000/default,1,0", 1);
+    set_env("TERM", "tmux-256color", 1);
+    set_env("TERM_PROGRAM", "tmux", 1);
+    set_env("TERM_PROGRAM_VERSION", "3.7b", 1);
+    set_env("MAYA_NO_SYNC", "1", 1);
     assert(!ansi::env_supports_synchronized_output()
            && "MAYA_NO_SYNC must override even a sync-capable tmux");
-    ::unsetenv("MAYA_NO_SYNC");
+    unset_env("MAYA_NO_SYNC");
 
     clear_env();
     std::println("PASS\n");
@@ -356,16 +374,16 @@ TEST_CASE("wrap_for_tmux wraps only inside tmux, doubling ESCs") {
     // "tmux-256color". The probe also memoises its answer, so a stale
     // verdict outlives the env change. Clear BOTH signals and reset the
     // cache so the case tests the branch it names on every host.
-    ::unsetenv("TMUX");
-    ::setenv("TERM", "xterm-256color", 1);
-    ::unsetenv("MAYA_TMUX_FAKE");
+    unset_env("TMUX");
+    set_env("TERM", "xterm-256color", 1);
+    unset_env("MAYA_TMUX_FAKE");
     tmux::reset_cache_for_test();
     const std::string seq = "\x1b]5522;type=read;Zm9v\x1b\\";
     assert(ansi::wrap_for_tmux(seq) == seq
            && "outside tmux wrap_for_tmux must be a no-op");
 
     // In tmux: wrapped in ESC P tmux ; … ESC \ with every inner ESC DOUBLED.
-    ::setenv("TMUX", "/tmp/tmux-1000/default,1,0", 1);
+    set_env("TMUX", "/tmp/tmux-1000/default,1,0", 1);
     tmux::reset_cache_for_test();
     const std::string wrapped = ansi::wrap_for_tmux(seq);
     // Must start with the DCS passthrough intro and end with ST.
@@ -383,7 +401,7 @@ TEST_CASE("wrap_for_tmux wraps only inside tmux, doubling ESCs") {
     for (char c : wrapped) if (c == '\x1b') ++escs;
     assert(escs == 6 && "payload ESCs must be doubled inside the tmux wrapper");
 
-    ::unsetenv("TMUX");
+    unset_env("TMUX");
     std::println("PASS\n");
 }
 
@@ -391,30 +409,30 @@ TEST_CASE("env_supports_osc5522 is speculative inside tmux") {
     std::println("--- test_osc5522_tmux ---");
     auto clear = [] {
         for (const char* v : {"KITTY_WINDOW_ID", "TERM", "TMUX"})
-            ::unsetenv(v);
+            unset_env(v);
     };
 
     // kitty locally.
     clear();
-    ::setenv("KITTY_WINDOW_ID", "1", 1);
+    set_env("KITTY_WINDOW_ID", "1", 1);
     assert(ansi::env_supports_osc5522() && "KITTY_WINDOW_ID -> true");
 
     // kitty over ssh (only TERM survives).
     clear();
-    ::setenv("TERM", "xterm-kitty", 1);
+    set_env("TERM", "xterm-kitty", 1);
     assert(ansi::env_supports_osc5522() && "TERM=xterm-kitty -> true");
 
     // Plain non-kitty, no tmux: false.
     clear();
-    ::setenv("TERM", "xterm-256color", 1);
+    set_env("TERM", "xterm-256color", 1);
     assert(!ansi::env_supports_osc5522() && "plain xterm -> false");
 
     // Inside tmux, kitty's fingerprints are erased (TERM rewritten, no
     // KITTY_WINDOW_ID) — we return true SPECULATIVELY so the tmux-wrapped
     // request gets sent and kitty (if outer) can answer with an image.
     clear();
-    ::setenv("TERM", "tmux-256color", 1);
-    ::setenv("TMUX", "/tmp/tmux-1000/default,1,0", 1);
+    set_env("TERM", "tmux-256color", 1);
+    set_env("TMUX", "/tmp/tmux-1000/default,1,0", 1);
     assert(ansi::env_supports_osc5522()
            && "inside tmux env_supports_osc5522 must be speculatively true");
 

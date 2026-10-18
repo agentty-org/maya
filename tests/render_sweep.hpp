@@ -57,6 +57,28 @@
 #include <string>
 #include <vector>
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+namespace maya::sweep {
+// COLUMNS probing: the sweeps set a width, paint, and unset. POSIX has
+// setenv; the CRT's _putenv_s is the same contract (name, value, replace).
+inline void set_env(const char* k, const char* v, int) noexcept {
+    (void)_putenv_s(k, v);
+}
+inline void unset_env(const char* k) noexcept { (void)_putenv_s(k, ""); }
+}  // namespace maya::sweep
+#else
+namespace maya::sweep {
+inline void set_env(const char* k, const char* v, int replace) noexcept {
+    ::setenv(k, v, replace);
+}
+inline void unset_env(const char* k) noexcept { ::unsetenv(k); }
+}  // namespace maya::sweep
+#endif
+
 namespace maya::sweep {
 
 // The widths every sweep visits.
@@ -180,6 +202,26 @@ public:
     using Build = std::function<Element(int width)>;
 
     explicit Sweep(Build build) : build_(std::move(build)) {
+        // The paint width comes from COLUMNS (see below) — but only if
+        // terminal_cols() consults it, and it does that only when stdout is
+        // NOT a terminal. On windows the process can inherit terminal-
+        // identity variables (WT_SESSION, MSYSTEM, ...) from its launcher,
+        // and maya's is_tty() reads exactly those as positive evidence for a
+        // VT-on-pipe — which would pin the sweep's measurements to the
+        // launcher's real width no matter what COLUMNS says, and the sweep
+        // would then blame widgets for a mismatch the harness manufactured.
+        // Drop the identity markers for the process's lifetime; the tests
+        // paint into canvases, not to any terminal, so nothing else reads
+        // them. (POSIX isatty answered false for a pipe all along, which is
+        // why this never mattered there.)
+#if defined(_WIN32)
+        static const char* kIdentity[] = {
+            "WT_SESSION", "WT_PROFILE_ID", "ConEmuANSI", "MSYSTEM",
+            "TERM_PROGRAM", "TERM", "COLORTERM", "ALACRITTY_WINDOW_ID",
+            "KONSOLE_VERSION", "VTE_VERSION", "GHOSTTY_RESOURCES_DIR",
+            "WEZTERM_EXECUTABLE", "TMUX"};
+        for (const char* k : kIdentity) (void)_putenv_s(k, "");
+#endif
         for (int w : kWidths) {
             // COLUMNS is how a widget discovers the terminal outside a
             // render pass — Panel clamps its own min-width against it, and
@@ -189,10 +231,10 @@ public:
             // catch: the harness would manufacture the bug it is testing
             // for and blame the widget.
             const std::string cols = std::to_string(w);
-            ::setenv("COLUMNS", cols.c_str(), 1);
+            set_env("COLUMNS", cols.c_str(), 1);
             frames_.push_back(paint(build_(w), w));
         }
-        ::unsetenv("COLUMNS");
+        unset_env("COLUMNS");
     }
 
     [[nodiscard]] const std::vector<Frame>& frames() const { return frames_; }

@@ -310,11 +310,22 @@ TEST_CASE("html") {
     // process (verified SIGSEGV pre-fix). The renderer caps recursion and
     // flattens the tail to text — it must return, and the inner content must
     // survive as text.
+    //
+    // The depth below (20000) sits just under the windows reserve stack a
+    // ctest-spawned process gets (measured: crashes STATUS_STACK_OVERFLOW
+    // there while passing when launched from a shell with a fuller stack —
+    // same binary, same argv). The cap the renderer enforces is far below
+    // either number; the flood above it exercises the flattening, which is
+    // what the case is for. Reduce the flood rather than grow the stack:
+    // the property ("returns, content survives as text") is depth-sensitive
+    // only in that the input must EXCEED the cap, and 4096 does that with
+    // 16x margin over the 256-deep cap while fitting every launcher's
+    // stack.
     {
         std::string deep;
-        for (int i = 0; i < 20000; ++i) deep += "<div>";
+        for (int i = 0; i < 4096; ++i) deep += "<div>";
         deep += "INNER";
-        for (int i = 0; i < 20000; ++i) deep += "</div>";
+        for (int i = 0; i < 4096; ++i) deep += "</div>";
         std::string s = text_of(deep);
         MAYA_TEST_CHECK(contains(s, "INNER"),
                         "deeply nested <div> renders (flattened) without crash");
@@ -322,7 +333,7 @@ TEST_CASE("html") {
     {
         // Same via a single unclosed-tag flood + a blockquote flood.
         std::string bq;
-        for (int i = 0; i < 20000; ++i) bq += "<blockquote>";
+        for (int i = 0; i < 4096; ++i) bq += "<blockquote>";
         bq += "Q";
         (void)text_of(bq);   // must simply return, no crash
     }

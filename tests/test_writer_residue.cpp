@@ -16,12 +16,21 @@
 
 #include "agtest.hpp"
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
 #include <fcntl.h>
 #include <unistd.h>
+#endif
 
 #include <print>
 #include <random>
 #include <string>
+#include <atomic>
+#include <thread>
 
 using namespace maya;
 
@@ -47,6 +56,87 @@ std::string random_frame(std::mt19937& rng) {
 
 TEST_CASE("writer residue: bytes come out whole, in order, never split mid-unit") {
     std::println("--- test_writer_residue ---");
+#if defined(_WIN32)
+    // The property under test is byte-stream integrity across partial
+    // writes. Windows anonymous pipes have no O_NONBLOCK: once the 64 KiB
+    // buffer fills, WriteFile BLOCKS — so a drain-after-write loop would
+    // deadlock the moment the writer outpaces the reader (POSIX surfaces
+    // the same state as EAGAIN -> would_block -> residue). The faithful
+    // windows translation of "the reader keeps up" is a reader THREAD that
+    // drains continuously; the main thread writes and the final barrier
+    // gives the reader the whole stream before the prefix check runs.
+    for (std::uint32_t seed = 1; seed <= 25; ++seed) {
+        std::mt19937 rng(seed);
+        HANDLE r = nullptr, w = nullptr;
+        SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, FALSE};
+        assert(::CreatePipe(&r, &w, &sa, 64 * 1024));
+        std::string sent, got;
+        {
+            Writer wr{w};
+
+            std::atomic<bool> stop{false};
+            auto reader = std::jthread([&] {
+                char chunk[4096];
+                while (!stop.load(std::memory_order_acquire)) {
+                    DWORD avail = 0;
+                    if (!::PeekNamedPipe(r, nullptr, 0, nullptr, &avail, nullptr))
+                        break;                       // write end closed
+                    if (avail == 0) {
+                        std::this_thread::yield();
+                        continue;
+                    }
+                    const DWORD want = static_cast<DWORD>(
+                        std::min<std::size_t>(sizeof chunk, avail));
+                    DWORD n = 0;
+                    if (!::ReadFile(r, chunk, want, &n, nullptr) || n == 0)
+                        break;
+                    got.append(chunk, n);
+                }
+            });
+
+            for (int f = 0; f < 40; ++f) {
+                const std::string frame = random_frame(rng);
+                sent += frame;
+                auto st = wr.write_or_buffer(frame);
+                assert(st.has_value());
+                if (rng() % 3 == 0) (void)wr.try_drain_residue();
+            }
+
+            // Flush the residue, THEN drop the write end so the reader can
+            // see the pipe close and stop. The prefix invariant holds at the
+            // barrier: everything read so far is a prefix of what was sent
+            // (nothing lost, reordered or duplicated at any point in the
+            // drain); after it, the byte streams must be EQUAL.
+            for (int guard = 0; wr.has_residue() && guard < 100000; ++guard)
+                (void)wr.try_drain_residue();
+            assert(!wr.has_residue());
+            stop.store(true, std::memory_order_release);
+            reader.join();   // the reader owns `got`; it must be done before the compare
+        }   // ~Writer: flush + restore
+        // Write end handed to the Writer above is closed by its destructor
+        // path on posix; on windows the HANDLE ownership is ours, so close
+        // it now and let the reader drain the tail before comparing.
+        ::CloseHandle(w);
+        {
+            char chunk[4096];
+            for (;;) {
+                DWORD avail = 0;
+                if (!::PeekNamedPipe(r, nullptr, 0, nullptr, &avail, nullptr)) break;
+                if (avail == 0) break;
+                DWORD n = 0;
+                if (!::ReadFile(r, chunk, sizeof chunk, &n, nullptr) || n == 0) break;
+                got.append(chunk, n);
+            }
+        }
+        if (got != sent) {
+            std::size_t i = 0;
+            while (i < got.size() && i < sent.size() && got[i] == sent[i]) ++i;
+            std::println("  MISMATCH seed={} at byte {} of {} (got {})", seed, i, sent.size(), got.size());
+            assert(false);
+        }
+        ::CloseHandle(r);
+    }
+#else
     for (std::uint32_t seed = 1; seed <= 25; ++seed) {
         std::mt19937 rng(seed);
         int fds[2];
@@ -78,6 +168,7 @@ TEST_CASE("writer residue: bytes come out whole, in order, never split mid-unit"
             // safe_break_len, not here.)
             assert(sent.compare(0, got.size(), got) == 0);
         }
+
         // Drain to completion.
         for (int guard = 0; w.has_residue() && guard < 100000; ++guard) {
             read_some(65536);
@@ -92,5 +183,6 @@ TEST_CASE("writer residue: bytes come out whole, in order, never split mid-unit"
         }
         ::close(fds[0]);
     }
+#endif
     std::println("PASS\n");
 }

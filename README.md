@@ -185,7 +185,28 @@ cmake --build build -j$(sysctl -n hw.ncpu)
 
 ### Windows
 
-**MSYS2** (recommended):
+**MSYS2 clang64** (recommended — this is the toolchain the full test suite
+runs green under):
+```bash
+pacman -S mingw-w64-clang-x86_64-clang mingw-w64-clang-x86_64-cmake \
+          mingw-w64-clang-x86_64-ninja
+C:\msys64\clang64\bin\cmake.exe -B build -G Ninja \
+    -DCMAKE_CXX_COMPILER=C:\msys64\clang64\bin\clang++.exe
+cmake --build build -j%NUMBER_OF_PROCESSORS%
+ctest --test-dir build
+```
+All 676 tests pass on this toolchain (Windows 11, tested on an insider
+build). Two things the tests taught us, if you see them elsewhere:
+
+- a test harness that drives width through `COLUMNS` must also clear the
+  launcher's terminal-identity variables (`WT_SESSION`, `MSYSTEM`, …):
+  maya's `is_tty()` reads them as evidence for a VT-on-pipe, which would
+  otherwise pin width probes to the launcher's real size;
+- stdout is a pipe under most runners, and a redirected `printf` buffer
+  loses its tail on a crash mid-line — `fflush` per output block makes
+  the last surviving line tell you where it died.
+
+**MSYS2 ucrt-gcc** (untested by the suite):
 ```bash
 pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake
 cmake -B build -G "MinGW Makefiles"

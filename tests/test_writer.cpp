@@ -5,113 +5,142 @@
 #undef NDEBUG
 #include "agtest.hpp"
 #include <print>
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+namespace {
+// The Writer takes a NativeHandle -- a HANDLE on windows, an fd on posix --
+// and every test below wants the same thing: a sink that accepts bytes and
+// is gone by the end of the case. The RAII guard closes whichever open the
+// platform got; the POSIX spelling of open/close stays untouched below.
+struct null_sink {
+    maya::platform::NativeHandle h;
+    explicit null_sink() {
+#if defined(_WIN32)
+        h = ::CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_WRITE, nullptr,
+                          OPEN_EXISTING, 0, nullptr);
+        assert(h != INVALID_HANDLE_VALUE);
+#else
+        h = ::open("/dev/null", O_WRONLY);
+        assert(h >= 0);
+#endif
+    }
+    ~null_sink() {
+#if defined(_WIN32)
+        if (h != INVALID_HANDLE_VALUE) ::CloseHandle(h);
+#else
+        if (h >= 0) ::close(h);
+#endif
+    }
+    null_sink(const null_sink&)            = delete;
+    null_sink& operator=(const null_sink&) = delete;
+};
+}  // namespace
+#else
 #include <fcntl.h>
+#include <unistd.h>
+namespace {
+struct null_sink {
+    int h;
+    explicit null_sink() : h(::open("/dev/null", O_WRONLY)) { assert(h >= 0); }
+    ~null_sink() { if (h >= 0) ::close(h); }
+    null_sink(const null_sink&)            = delete;
+    null_sink& operator=(const null_sink&) = delete;
+};
+}  // namespace
+#endif
 
 using namespace maya;
 
 TEST_CASE("writer flush to devnull") {
     std::println("--- test_writer_flush_to_devnull ---");
-    int fd = ::open("/dev/null", O_WRONLY);
-    assert(fd >= 0);
-    Writer w(fd);
+    null_sink fd;
+    Writer w(fd.h);
     w.push(render_op::CursorHide{});
     w.push(render_op::Write{"hello"});
     w.push(render_op::Write{" world"});
     w.push(render_op::StyleStr{"\x1b[1m"});
     w.push(render_op::CursorShow{});
     auto status = w.flush();
-    ::close(fd);
     assert(status.has_value());
     std::println("PASS\n");
 }
 
 TEST_CASE("writer write raw") {
     std::println("--- test_writer_write_raw ---");
-    int fd = ::open("/dev/null", O_WRONLY);
-    assert(fd >= 0);
-    Writer w(fd);
+    null_sink fd;
+    Writer w(fd.h);
     auto status = w.write_raw("hello world\n");
-    ::close(fd);
     assert(status.has_value());
     std::println("PASS\n");
 }
 
 TEST_CASE("writer empty flush") {
     std::println("--- test_writer_empty_flush ---");
-    int fd = ::open("/dev/null", O_WRONLY);
-    assert(fd >= 0);
-    Writer w(fd);
+    null_sink fd;
+    Writer w(fd.h);
     auto status = w.flush(); // nothing pushed, should succeed
-    ::close(fd);
     assert(status.has_value());
     std::println("PASS\n");
 }
 
 TEST_CASE("writer multiple writes merged") {
     std::println("--- test_writer_multiple_writes_merged ---");
-    int fd = ::open("/dev/null", O_WRONLY);
-    assert(fd >= 0);
-    Writer w(fd);
+    null_sink fd;
+    Writer w(fd.h);
     // Consecutive Write ops should merge (batching optimization)
     w.push(render_op::Write{"aaa"});
     w.push(render_op::Write{"bbb"});
     w.push(render_op::Write{"ccc"});
     auto status = w.flush();
-    ::close(fd);
     assert(status.has_value());
     std::println("PASS\n");
 }
 
 TEST_CASE("writer cursor ops") {
     std::println("--- test_writer_cursor_ops ---");
-    int fd = ::open("/dev/null", O_WRONLY);
-    assert(fd >= 0);
-    Writer w(fd);
+    null_sink fd;
+    Writer w(fd.h);
     w.push(render_op::CursorHide{});
     w.push(render_op::CursorShow{});
     w.push(render_op::CursorHide{});
     auto status = w.flush();
-    ::close(fd);
     assert(status.has_value());
     std::println("PASS\n");
 }
 
 TEST_CASE("writer style and write") {
     std::println("--- test_writer_style_and_write ---");
-    int fd = ::open("/dev/null", O_WRONLY);
-    assert(fd >= 0);
-    Writer w(fd);
+    null_sink fd;
+    Writer w(fd.h);
     w.push(render_op::StyleStr{"\x1b[1;31m"});   // bold red
     w.push(render_op::Write{"ERROR"});
     w.push(render_op::StyleStr{"\x1b[0m"});       // reset
     auto status = w.flush();
-    ::close(fd);
     assert(status.has_value());
     std::println("PASS\n");
 }
 
 TEST_CASE("writer write raw empty string") {
     std::println("--- test_writer_write_raw_empty_string ---");
-    int fd = ::open("/dev/null", O_WRONLY);
-    assert(fd >= 0);
-    Writer w(fd);
+    null_sink fd;
+    Writer w(fd.h);
     auto status = w.write_raw("");
-    ::close(fd);
     assert(status.has_value());
     std::println("PASS\n");
 }
 
 TEST_CASE("writer large output") {
     std::println("--- test_writer_large_output ---");
-    int fd = ::open("/dev/null", O_WRONLY);
-    assert(fd >= 0);
-    Writer w(fd);
+    null_sink fd;
+    Writer w(fd.h);
     // Simulate a full-screen render by pushing 2000 bytes
     std::string chunk(100, 'X');
     for (int i = 0; i < 20; ++i)
         w.push(render_op::Write{chunk});
     auto status = w.flush();
-    ::close(fd);
     assert(status.has_value());
     std::println("PASS\n");
 }
