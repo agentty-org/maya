@@ -12,6 +12,7 @@
 
 #include "../../element/element.hpp"
 #include "../../style/color.hpp"
+#include "../peek_card.hpp"
 #include "../scrollbar.hpp"
 #include "item.hpp"
 #include "menu.hpp"
@@ -103,6 +104,12 @@ struct Config {
     // Borrowed; must outlive the built Element. Null disables scrolling.
     ScrollState* scroll     = nullptr;
     int          viewport_h = 14;
+
+    // A preview card floated over the rows right above the cursor row (the
+    // thread picker's peek). The panel keeps that many rows free above the
+    // cursor by scrolling, so the card never covers the row or moves below
+    // it, and never covers the header. Empty = no card.
+    std::optional<PeekCard::Config> peek;
 
     // The HOST clamps this to the terminal: a min-width wider than the
     // screen is not a minimum but an overflow, and the overlay centres the

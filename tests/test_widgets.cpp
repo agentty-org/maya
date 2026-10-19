@@ -1007,6 +1007,57 @@ TEST_CASE("panel virtualized large list renders selection") {
     std::println("  PASS\n");
 }
 
+// A peek card floats right above the cursor row: its bottom border is the
+// row just above the cursor, on the first row too, and it never covers the
+// header or the cursor row. Moving the cursor keeps that.
+TEST_CASE("panel peek sits right above the cursor") {
+    std::println("=== test_panel_peek_above_cursor ===");
+
+    auto find = [](const auto& rows, std::string_view s) {
+        for (int y = 0; y < static_cast<int>(rows.size()); ++y)
+            if (rows[static_cast<std::size_t>(y)].find(s) != std::string::npos) return y;
+        return -1;
+    };
+    for (int sel : {0, 1, 7, 29}) {
+        static ScrollState scroll = [] {
+            ScrollState s;
+            s.auto_dispatch = false;
+            return s;
+        }();
+        scroll.y = 0;
+        Panel::Config cfg;
+        cfg.title = " Threads ";
+        cfg.min_width = 40;
+        cfg.viewport_h = 22;
+        cfg.fixed_viewport = true;
+        cfg.scroll = &scroll;
+        cfg.header = {Element{TextElement{.content = "HEADERLINE"}}};
+        for (int i = 0; i < 30; ++i)
+            cfg.items.push_back(Panel::Item{.leading = "row" + std::to_string(i)});
+        cfg.selected = sel;
+        PeekCard::Config pc;
+        pc.title = "PEEKTITLE";
+        pc.hint  = "PEEKHINT";
+        pc.lines = {{"you", "hello", PeekCard::Kind::User}};
+        pc.rows = 8;
+        cfg.peek = pc;
+        const auto r = render_at(Panel{std::move(cfg)}.build(), 60);
+
+        const int cursor = find(r.rows, "row" + std::to_string(sel) + " ");
+        const int top    = find(r.rows, "PEEKTITLE");
+        const int header = find(r.rows, "HEADERLINE");
+        // The card's bottom border carries its hint (get_row reads box
+        // glyphs as '?', so the hint text is what finds the border).
+        const int bottom = find(r.rows, "PEEKHINT");
+        assert(cursor >= 0 && "the cursor row stays visible under the card");
+        assert(top >= 0 && bottom > top && "the card is drawn");
+        assert(bottom + 1 == cursor && "card bottom is the row right above the cursor");
+        assert(bottom - top + 1 == pc.rows && "the card is as tall as asked");
+        assert(header >= 0 && header < top && "the card never covers the header");
+    }
+    std::println("  PASS\n");
+}
+
 // Structured rows must remain exactly one row tall even when badge, leading,
 // and trailing cells all compete for a phone-sized terminal. Wrapping changes
 // row indices and makes the cursor highlight the wrong visual item.

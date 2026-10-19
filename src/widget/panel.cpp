@@ -1257,8 +1257,36 @@ Element Panel::build() const {
 
     for (const auto& h_row : cfg_.header) stack.push_back(h_row);
 
+    // The peek's height, kept free above the cursor by the scroll below.
+    // Lines above the body (border, padding, the stack so far) are measured
+    // only when there is a peek to place.
+    const int peek_rows = cfg_.peek ? std::max(0, cfg_.peek->rows) : 0;
+    const int peek_w = std::max(1, Config::content_width(
+        panel::detail::terminal_cols() > 0 ? panel::detail::terminal_cols()
+                                           : cfg_.min_width));
+    int head_lines = 0;
+    int cursor_row = -1;   // the cursor's line from the frame's top border
+    if (peek_rows > 0) {
+        head_lines = 2;
+        for (const auto& e : stack) head_lines += measure_element(e, peek_w).height.value;
+    }
+
     const Body body = measure_body();
-    const int content = body.total;
+    // With a peek, blank lines sit in front of the first row so even the
+    // first rows have the card's height free above them inside the body.
+    // Sized to the first SELECTABLE row (a day header may sit above it), so
+    // the cursor on that row lands exactly `peek_rows` down and the card
+    // covers the band and the header, with no blank row left showing.
+    int first_row = 0;
+    if (peek_rows > 0 && !body.opaque)
+        for (std::size_t i = 0; i < cfg_.items.size(); ++i)
+            if (!cfg_.items[i].is_header()) {
+                first_row = body.offsets[i];
+                break;
+            }
+    const int lead = peek_rows > 0 && !body.opaque ? std::max(0, peek_rows - first_row) : 0;
+    const int content = body.total + lead;
+    const int cursor_line = body.cursor_line < 0 ? -1 : body.cursor_line + lead;
     // Shrink-wrap to the content, UNLESS the caller asked for a fixed body.
     //
     // min() is right for a picker: a list of three matches should be three
@@ -1306,7 +1334,7 @@ Element Panel::build() const {
 
         if (content <= vh) {
             s.y = 0;                        // fits: never paint-shifted
-        } else if (body.cursor_line < 0) {
+        } else if (cursor_line < 0) {
             // Nothing holds the cursor, so there is nothing to keep in view.
             // Leave the offset alone (the user may have scrolled here by
             // wheel) and only re-clamp it against the current content.
@@ -1315,11 +1343,23 @@ Element Panel::build() const {
             // Clamp the span to what actually exists before using it. A row
             // whose help + error + open menu ran past the end would otherwise
             // scroll to an offset with nothing under it.
-            const int line = std::clamp(body.cursor_line, 0, content - 1);
+            const int line = std::clamp(cursor_line, 0, content - 1);
             const int span = std::clamp(body.cursor_span, 1, content - line);
             const int end  = line + span;
-            if (line < s.y)          s.y = line;
-            else if (end > s.y + vh) s.y = end - vh;
+            // Room for the peek above the cursor, capped so the cursor
+            // itself still fits in the viewport.
+            const int room = std::clamp(peek_rows, 0, std::max(0, vh - span));
+            if (peek_rows > 0) {
+                // Pinned: the cursor stays `room` rows down, so the card
+                // sits still and always covers what is above the row (the
+                // lead band near the top, earlier rows further down). Only
+                // the end of the list lets the cursor move lower.
+                s.y = std::clamp(line - room, 0, std::max(0, content - vh));
+            } else if (line < s.y) {
+                s.y = line;
+            } else if (end > s.y + vh) {
+                s.y = end - vh;
+            }
             // A capped measurement has no trustworthy upper bound of its own;
             // fall back to the one the renderer wrote back last frame.
             s.y = body.capped ? std::clamp(s.y, 0, std::max(s.max_y, 0))
@@ -1334,13 +1374,16 @@ Element Panel::build() const {
         // the same s.y it always did, because the spacers put the rendered
         // rows back at their true absolute positions.
         const int n_entries = static_cast<int>(body.offsets.size()) - 1;
+        // The windowing reads row positions without the lead band.
+        const int body_y = std::max(0, s.y - lead);
+        const int body_vh = vh - std::max(0, lead - s.y);
         const auto [first, last] = body.opaque
             ? std::pair{0, n_entries}          // opaque: never windowed
-            : visible_rows(body, s.y, vh);
+            : visible_rows(body, body_y, std::max(1, body_vh));
 
         std::vector<Element> lines;
-        const int above = body.offsets[static_cast<std::size_t>(first)];
-        const int below = content - body.offsets[static_cast<std::size_t>(last)];
+        const int above = lead + body.offsets[static_cast<std::size_t>(first)];
+        const int below = content - lead - body.offsets[static_cast<std::size_t>(last)];
         if (!body.opaque && above > 0) lines.push_back(spacer_rows(above));
         for (auto& line : render_range(body, first, last))
             lines.push_back(std::move(line));
@@ -1373,11 +1416,17 @@ Element Panel::build() const {
             // nothing — there is no hidden content to indicate.
             : (spacer_rows(vh) | width(1));
         stack.push_back(h(std::move(scrollable), std::move(gutter)).build());
+        if (peek_rows > 0 && cursor_line >= 0) {
+            const int in_view = cursor_line - s.y;
+            cursor_row = (in_view >= 0 && in_view < vh) ? head_lines + in_view : -1;
+        }
     } else {
         // No scroll state: nothing can be off-screen, so nothing is skipped.
         for (auto& line : render_range(body, 0,
                                        static_cast<int>(body.offsets.size()) - 1))
             stack.push_back(std::move(line));
+        if (peek_rows > 0 && body.cursor_line >= 0)
+            cursor_row = head_lines + body.cursor_line;
     }
 
     // Fixed chrome below the body — outside the scroll region, so a validation
@@ -1431,7 +1480,7 @@ Element Panel::build() const {
     }
     for (const auto& f_row : cfg_.footer) stack.push_back(f_row);
 
-    return maya::detail::vstack()
+    Element frame = maya::detail::vstack()
         .padding(1, 2)
         // The panel sits ON the canvas, so it carries the canvas colour.
         //
@@ -1470,6 +1519,32 @@ Element Panel::build() const {
         .border_color(cfg_.accent)
         .border_text(cfg_.title, BorderTextPos::Top, BorderTextAlign::Center)
         (std::vector<Element>{v(std::move(stack)).build()});
+
+    // The peek: a card over the rows right above the cursor, its bottom
+    // border on the row just above it. The scroll and the lead band above
+    // always leave that much of the body free, so the card stays inside the
+    // frame and never covers the header, the row, or anything below it.
+    if (peek_rows <= 0 || cursor_row < 0) return frame;
+    const int rows = std::min(peek_rows, cursor_row - head_lines);
+    if (rows < 4) return frame;
+    PeekCard::Config pc = *cfg_.peek;
+    pc.rows = rows;
+    // A column the frame's height, so its row r is the frame's row r; the
+    // card sits inside the frame's side padding, like the rows. Both parts
+    // are fixed-size and unshrinkable: the overlay is laid out at the full
+    // frame height, and flex would otherwise stretch or squeeze them and
+    // move the card off the row it belongs to.
+    BoxElement gap;
+    gap.layout.height     = Dimension::fixed(cursor_row - rows);
+    gap.layout.min_height = Dimension::fixed(cursor_row - rows);
+    gap.layout.shrink     = 0.0f;
+    Element card = maya::detail::vstack()
+        .height(Dimension::fixed(rows))
+        .min_height(Dimension::fixed(rows))
+        .shrink(0.0f)(PeekCard{std::move(pc)}.build());
+    Element layer = maya::detail::vstack().padding(0, 2)(
+        Element{std::move(gap)}, std::move(card));
+    return maya::detail::zstack({std::move(frame), std::move(layer)});
 }
 
 } // namespace maya
