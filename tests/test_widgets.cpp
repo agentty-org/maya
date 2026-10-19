@@ -23,6 +23,7 @@
 #include <maya/widget/modal.hpp>
 #include <maya/widget/model_badge.hpp>
 #include <maya/widget/panel.hpp>
+#include <maya/widget/peek_card.hpp>
 #include <maya/widget/progress.hpp>
 #include <maya/widget/reasoning.hpp>
 #include <maya/widget/select.hpp>
@@ -1007,53 +1008,39 @@ TEST_CASE("panel virtualized large list renders selection") {
     std::println("  PASS\n");
 }
 
-// A peek card floats right above the cursor row: its bottom border is the
-// row just above the cursor, on the first row too, and it never covers the
-// header or the cursor row. Moving the cursor keeps that.
-TEST_CASE("panel peek sits right above the cursor") {
-    std::println("=== test_panel_peek_above_cursor ===");
-
-    auto find = [](const auto& rows, std::string_view s) {
-        for (int y = 0; y < static_cast<int>(rows.size()); ++y)
-            if (rows[static_cast<std::size_t>(y)].find(s) != std::string::npos) return y;
-        return -1;
-    };
-    for (int sel : {0, 1, 7, 29}) {
-        static ScrollState scroll = [] {
-            ScrollState s;
-            s.auto_dispatch = false;
-            return s;
-        }();
-        scroll.y = 0;
-        Panel::Config cfg;
-        cfg.title = " Threads ";
-        cfg.min_width = 40;
-        cfg.viewport_h = 22;
-        cfg.fixed_viewport = true;
-        cfg.scroll = &scroll;
-        cfg.header = {Element{TextElement{.content = "HEADERLINE"}}};
-        for (int i = 0; i < 30; ++i)
-            cfg.items.push_back(Panel::Item{.leading = "row" + std::to_string(i)});
-        cfg.selected = sel;
+// The preview is a framed block of a fixed height whatever it holds: the
+// label on the top border, facts flush right on the title row, the hint on
+// the bottom border, and the transcript filling exactly transcript_rows().
+TEST_CASE("peek card is a fixed, framed block") {
+    std::println("=== test_peek_card_fixed ===");
+    for (int n : {0, 1, 30}) {
         PeekCard::Config pc;
-        pc.title = "PEEKTITLE";
-        pc.hint  = "PEEKHINT";
-        pc.lines = {{"you", "hello", PeekCard::Kind::User}};
-        pc.rows = 8;
-        cfg.peek = pc;
-        const auto r = render_at(Panel{std::move(cfg)}.build(), 60);
-
-        const int cursor = find(r.rows, "row" + std::to_string(sel) + " ");
-        const int top    = find(r.rows, "PEEKTITLE");
-        const int header = find(r.rows, "HEADERLINE");
-        // The card's bottom border carries its hint (get_row reads box
-        // glyphs as '?', so the hint text is what finds the border).
-        const int bottom = find(r.rows, "PEEKHINT");
-        assert(cursor >= 0 && "the cursor row stays visible under the card");
-        assert(top >= 0 && bottom > top && "the card is drawn");
-        assert(bottom + 1 == cursor && "card bottom is the row right above the cursor");
-        assert(bottom - top + 1 == pc.rows && "the card is as tall as asked");
-        assert(header >= 0 && header < top && "the card never covers the header");
+        pc.title = "TITLE";
+        pc.facts = "FACTS";
+        pc.subtitle = "SUB";
+        pc.asked = "ASKED";
+        pc.hint = "HINT";
+        pc.rows = 12;
+        for (int i = 0; i < n; ++i)
+            pc.lines.push_back({"you", "line" + std::to_string(i), PeekCard::Kind::User});
+        const auto r = render_at(PeekCard{pc}.build(), 60);
+        auto row_of = [&](std::string_view s) {
+            for (int y = 0; y < static_cast<int>(r.rows.size()); ++y)
+                if (r.rows[static_cast<std::size_t>(y)].find(s) != std::string::npos) return y;
+            return -1;
+        };
+        assert(r.content_h == 12 && "the card never changes height");
+        assert(row_of("Preview") == 0 && "label on the top border");
+        assert(row_of("TITLE") == 1 && row_of("FACTS") == 1 && "facts on the title row");
+        assert(row_of("HINT") == 11 && "hint on the bottom border");
+        // Facts end against the right border: "FACTS ?" with one pad space.
+        const auto& t = r.rows[1];
+        assert(t.find("FACTS") + 5 + 2 == t.find_last_not_of(' ') + 1 && "facts flush right");
+        const int fit = PeekCard::transcript_rows(pc);
+        assert(fit == 12 - 2 - 4 && "border, title, sub, asked, divider leave 6");
+        const int want = std::min(n, fit);
+        assert((want == 0 || row_of("line" + std::to_string(want - 1)) >= 0) && "fills its rows");
+        assert(row_of("line" + std::to_string(want)) < 0 && "and no more");
     }
     std::println("  PASS\n");
 }
