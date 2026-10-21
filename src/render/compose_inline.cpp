@@ -982,7 +982,7 @@ compose_inline_frame_impl(const Canvas& canvas,
                 // erased region inherits no attributes from the last
                 // emitted cell.
                 if (current_style != 0) {
-                    out.append(pool.sgr(0));
+                    pool.close_link(current_style, out); out.append(pool.sgr(0));
                     current_style = 0;
                 }
                 // DECAWM-off precondition: if the emit filled through
@@ -1079,7 +1079,7 @@ compose_inline_frame_impl(const Canvas& canvas,
         // Reset SGR before erase so erased cells inherit no attrs
         // from the last emitted cell.
         if (current_style != 0) {
-            out.append(pool.sgr(0));
+            pool.close_link(current_style, out); out.append(pool.sgr(0));
             current_style = 0;
         }
         // Now position cursor and erase the rows that the new (shorter)
@@ -1120,6 +1120,7 @@ compose_inline_frame_impl(const Canvas& canvas,
     // next compose starts from a known floor (current_style sentinel
     // becomes UINT16_MAX on entry; the wire is at id 0). Always safe
     // — the shrink path above already reset to 0 when needed.
+    if (links_used()) out += "\x1b]8;;\x1b\\";   // and any OSC 8 link
     out += ansi::reset;   // drop residual SGR
 
     // ── Frame epilogue: hardware caret or parked hide ────────────────

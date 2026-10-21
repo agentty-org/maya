@@ -314,6 +314,12 @@ public:
     void write_transition_sgr(uint16_t prev_id, uint16_t new_id,
                               std::string& out) const;
 
+    /// Before an SGR reset that drops the style: close its OSC 8 link, if
+    /// it has one (the reset doesn't end a link).
+    void close_link(uint16_t id, std::string& out) const {
+        if (id < styles_.size() && styles_[id].link) out.append("\x1b]8;;\x1b\\");
+    }
+
     /// Number of interned styles.
     [[nodiscard]] std::size_t size() const noexcept { return styles_.size(); }
 

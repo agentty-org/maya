@@ -10,7 +10,51 @@
 #include "maya/device/environment.hpp"
 #include "maya/style/theme.hpp"
 
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
 namespace maya {
+
+// ── OSC 8 link registry ─────────────────────────────────────────────────
+namespace {
+struct LinkRegistry {
+    std::mutex mu;
+    std::vector<std::string> uris{std::string{}};   // id 0: no link
+    std::unordered_map<std::string, uint16_t> ids;
+};
+LinkRegistry& links() { static LinkRegistry r; return r; }
+std::atomic<bool> g_links_used{false};
+// what may go between ESC ] 8 ; ; and ST: printable ASCII, no ESC/BEL
+bool uri_ok(std::string_view u) {
+    if (u.empty() || u.size() > 2048) return false;
+    for (unsigned char c : u) if (c < 0x21 || c > 0x7e) return false;
+    return true;
+}
+bool link_registry_used() noexcept { return g_links_used.load(std::memory_order_relaxed); }
+}  // namespace
+
+bool links_used() noexcept { return link_registry_used(); }
+
+uint16_t link_id(std::string_view uri) {
+    if (!uri_ok(uri)) return 0;
+    auto& r = links();
+    std::lock_guard lk(r.mu);
+    if (auto it = r.ids.find(std::string(uri)); it != r.ids.end()) return it->second;
+    if (r.uris.size() >= 0xFFFF) return 0;
+    const auto id = static_cast<uint16_t>(r.uris.size());
+    r.uris.emplace_back(uri);
+    r.ids.emplace(std::string(uri), id);
+    g_links_used.store(true, std::memory_order_relaxed);
+    return id;
+}
+
+const std::string& link_uri(uint16_t id) {
+    auto& r = links();
+    std::lock_guard lk(r.mu);
+    return id < r.uris.size() ? r.uris[id] : r.uris[0];
+}
 
 namespace {
 
@@ -323,6 +367,19 @@ void StylePool::write_transition_sgr(uint16_t prev_id, uint16_t new_id,
     if (new_id >= n) new_id = 0;
     if (prev_id != UINT16_MAX && prev_id >= n) prev_id = 0;
 
+    // OSC 8: a link opens where its cells start and closes where they end.
+    // Unknown state (frame start) closes first, in case one was left open.
+    {
+        const bool unknown = prev_id == UINT16_MAX;
+        const uint16_t from_link = unknown ? 0 : styles_[prev_id].link;
+        const uint16_t to_link = styles_[new_id].link;
+        if (unknown && link_registry_used()) out.append("\x1b]8;;\x1b\\");
+        if (from_link != to_link) {
+            if (to_link) { out.append("\x1b]8;;"); out.append(link_uri(to_link)); out.append("\x1b\\"); }
+            else out.append("\x1b]8;;\x1b\\");
+        }
+    }
+
     // Unknown terminal state (no SGR emitted yet this frame). Fall back
     // to the full reset-and-set form so the terminal lands at a known
     // configuration regardless of any residual SGR from before maya
@@ -556,6 +613,7 @@ std::size_t StylePool::hash_style(const Style& s) noexcept {
     if (s.caret_anchor)  flags |= (1 << 7);
     mix(flags);
     if (s.caret_shape) mix(0xCA00u | s.caret_shape);
+    if (s.link) mix(0x11C0000u | s.link);
 
     // Hash the AUTHORED value, not the painted one. A slot and the literal it
     // currently resolves to are different styles that must not share a cache

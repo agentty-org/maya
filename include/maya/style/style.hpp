@@ -11,6 +11,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace maya {
 
@@ -94,6 +95,12 @@ struct Style {
     /// concealed anyway, so fg is free to carry it.
     uint8_t caret_shape = 0;
 
+    /// OSC 8 hyperlink: an id from link_id(uri) (0 = none). Cells with it
+    /// are one clickable link in terminals that support OSC 8; others
+    /// ignore the escape. Not SGR: the transition writer opens and closes
+    /// it as the link changes from cell to cell.
+    uint16_t link = 0;
+
     // -- Fluent builder (each returns a new Style) ---------------------------
 
     /// Return a copy with the foreground color set.
@@ -176,6 +183,13 @@ struct Style {
         return s;
     }
 
+    /// Return a copy that is an OSC 8 link (an id from maya::link_id).
+    [[nodiscard]] constexpr Style with_link(uint16_t id) const noexcept {
+        Style s = *this;
+        s.link = id;
+        return s;
+    }
+
     // -- SGR generation ------------------------------------------------------
 
     /// Build the full ANSI SGR escape sequence for this style.
@@ -252,6 +266,7 @@ struct Style {
         if (other.conceal)       out.conceal       = true;
         if (other.caret_anchor)  out.caret_anchor  = true;
         if (other.caret_shape)   out.caret_shape   = other.caret_shape;
+        if (other.link)          out.link          = other.link;
 
         return out;
     }
@@ -261,7 +276,7 @@ struct Style {
         return !fg.has_value() && !bg.has_value()
             && !bold && !dim && !italic && !underline
             && !strikethrough && !inverse && !conceal && !caret_anchor
-            && caret_shape == 0;
+            && caret_shape == 0 && link == 0;
     }
 
     constexpr auto operator<=>(const Style&) const = default;
@@ -402,5 +417,13 @@ inline constexpr Style underline = underline_style;
             return Style{};
     }
 }
+
+/// OSC 8 links: an id for a URI, for Style::with_link (the same URI gets
+/// the same id). Ids are kept for the program's life, up to 65535; past
+/// that link_id returns 0 (plain text). link_uri(0) is "".
+[[nodiscard]] uint16_t link_id(std::string_view uri);
+[[nodiscard]] const std::string& link_uri(uint16_t id);
+/// Has any link been made (link_id)? Frames then close OSC 8 at their end.
+[[nodiscard]] bool links_used() noexcept;
 
 } // namespace maya
