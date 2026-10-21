@@ -38,6 +38,7 @@
 #include <jaal/kernel/published.hpp>
 #include <jaal/kernel/snapshot.hpp>
 #include <jaal/kernel/stop_group.hpp>
+#include <jaal/kernel/strays.hpp>
 #include <jaal/kernel/worker_group.hpp>
 #include <jaal/platform/clock.hpp>
 #include <jaal/platform/concepts.hpp>
@@ -124,6 +125,7 @@ template <class T> using snapshot = ::jaal::snapshot<T>;  // read-mostly value, 
 using ::jaal::nursery;
 using pool       = ::jaal::kernel::pool;        // owned worker threads
 using stop_group = ::jaal::kernel::stop_group;  // cancel or await work
+using ::jaal::strays;                           // threads a shutdown gave up on, still running
 using worker_group = ::jaal::kernel::worker_group;  // owned jobs, barrier stop
 using ::jaal::kernel::CheckedJob;               // captureless body, Sendable args
 using ::jaal::kernel::require_job;
