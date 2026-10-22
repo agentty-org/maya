@@ -55,7 +55,10 @@ widget/markdown/streaming/markdown_memo.cpp: thread_local
 # is jaal's Frozen/shared discipline, hand-written here because maya's
 # palette predates it and is read from free functions with no kernel. The
 # atomic IS the safe abstraction, not a shortcut past one.
-render/canvas.cpp: atomic
+# The OSC 8 link registry (link_id / link_uri) is the same shape: a small
+# process-wide table read from free functions while rendering. Its mutex is a
+# leaf: held only for a map lookup or insert, never while waiting or calling out.
+render/canvas.cpp: atomic mutex
 terminal/input.cpp: atomic
 render/renderer.cpp: atomic thread_local
 render/render_internal.hpp: atomic thread_local

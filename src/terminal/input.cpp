@@ -205,6 +205,20 @@ auto InputParser::feed(std::string_view bytes) -> std::vector<Event> {
                 // latch is a keyboard-modifier convention only.
                 const std::size_t before = events.size();
                 const int acks_before = acks_;
+                // tmux with extended-keys on re-encodes what a terminal
+                // sends: ESC ] arrives as CSI 27;3;93 ~ (Alt+]) and ESC \
+                // as CSI 27;3;92 ~ (Alt+\). Followed by a clipboard reply
+                // ("5522;" / "52;"), it is that reply's OSC opener, not a
+                // key: read it as one, or the reply is typed in as text.
+                if (buf_ == "\x1b[27;3;93~") {
+                    const auto rest = bytes.substr(i + 1);
+                    if (rest.starts_with("5522;") || rest.starts_with("52;")) {
+                        buf_ = "\x1b]";
+                        state_ = State::Osc;
+                        pending_alt_ = false;
+                        break;
+                    }
+                }
                 parse_csi(events);
                 // ...unless the CSI was a REPORT (the per-frame ack,
                 // `CSI 0 n`). A report is the terminal talking, not a key,
@@ -252,6 +266,16 @@ auto InputParser::feed(std::string_view bytes) -> std::vector<Event> {
                 break;
             }
             buf_ += static_cast<char>(ch);
+            // tmux extended-keys: the ST (ESC \) that ends this OSC arrives
+            // as CSI 27;3;92 ~ (see the Csi case).
+            if (ch == '~' && buf_.size() >= 10
+                && std::string_view(buf_).substr(buf_.size() - 10) == "\x1b[27;3;92~") {
+                buf_.resize(buf_.size() - 10);
+                buf_ += "\x1b\\";
+                parse_osc(events);
+                state_ = State::Ground;
+                break;
+            }
             // A frame's DSR reply (ESC[0n) can land inside a long OSC reply
             // (a clipboard image streaming in): it's an ack, not OSC data.
             // Left in, its ESC breaks the reply and the rest of the image
