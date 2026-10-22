@@ -213,6 +213,13 @@ private:
     // Inactivity deadlines per pending state — see flush_timeout() docs.
     static constexpr auto escape_timeout_ = std::chrono::milliseconds(50);
     static constexpr auto kOscTimeout     = std::chrono::milliseconds(1000);
+    // While an OSC 5522 clipboard reply is open, how long a packet may stall
+    // before the reply is given up (a slow ssh link pauses mid image).
+    static constexpr auto kClipboardStall = std::chrono::milliseconds(10000);
+    // A clipboard reply was given up mid way: its remains are dropped, up to
+    // its DONE packet (or kClipboardStall later), never typed in.
+    bool draining_5522_ = false;
+    std::chrono::steady_clock::time_point drain_since_{};
     static constexpr auto kPasteTimeout   = std::chrono::milliseconds(2000);
     // A single read of at least this many plain bytes (no escapes, no
     // control keys) is taken as an unbracketed paste. Typing, even key

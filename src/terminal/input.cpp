@@ -57,6 +57,21 @@ auto InputParser::feed(std::string_view bytes) -> std::vector<Event> {
     // each is its own event, marked unbracketed, and the app joins them. A
     // short read right after such a burst (its tail) is part of it too.
     const auto now = clock::now();
+    // The remains of a clipboard reply we gave up on (it stalled past
+    // kClipboardStall): drop everything up to its DONE packet. Typing it in
+    // dumped megabytes of base64 into the input box.
+    if (draining_5522_ && state_ == State::Ground) {
+        constexpr std::string_view kDone = "type=read:status=DONE";
+        const auto at = bytes.find(kDone);
+        if (at == std::string_view::npos && now - drain_since_ < kClipboardStall) return events;
+        draining_5522_ = false;
+        if (at != std::string_view::npos) {
+            auto st = bytes.find("\x1b\\", at);
+            if (st == std::string_view::npos) st = bytes.find('\x07', at);
+            bytes.remove_prefix(st == std::string_view::npos ? bytes.size() : st + (bytes[st] == 0x07 ? 1 : 2));
+            if (bytes.empty()) return events;
+        }
+    }
     // A big read right after a burst is more of it however long the reader
     // took (a busy app reads a large paste slowly). A small one only counts
     // if it came quickly, so a key typed after a paste stays a key.
@@ -406,7 +421,15 @@ auto InputParser::flush_timeout() -> std::vector<Event> {
         // Taking that ESC as the Escape key throws the parser out of the
         // reply and the rest of the image arrives as thousands of typed
         // characters. While a reply is open, wait as long as for any OSC.
-        if (elapsed >= (osc5522_active_ ? kOscTimeout : escape_timeout_)) {
+        if (elapsed >= (osc5522_active_ ? kClipboardStall : escape_timeout_)) {
+            if (osc5522_active_) {
+                // The image reply died mid packet: no Escape key, just drop
+                // what's left of it.
+                draining_5522_ = true;
+                drain_since_ = clock::now();
+                to_ground();
+                break;
+            }
             events.emplace_back(KeyEvent{
                 .key = SpecialKey::Escape,
                 .mods = {.alt = pending_alt_},
@@ -424,7 +447,7 @@ auto InputParser::flush_timeout() -> std::vector<Event> {
         // kept the event loop waking every 16ms, and the user's next
         // real keystrokes were swallowed as CSI parameter bytes until
         // one happened to land in the final-byte range 0x40–0x7E.
-        if (elapsed >= escape_timeout_) to_ground();
+        if (elapsed >= (osc5522_active_ ? kClipboardStall : escape_timeout_)) to_ground();
         break;
 
     case State::Utf8:
@@ -444,8 +467,13 @@ auto InputParser::flush_timeout() -> std::vector<Event> {
         // OSC replies (clipboard reads) can be megabytes streaming over
         // a slow link, so the deadline is generous — and it's an
         // INACTIVITY deadline (feed() refreshes escape_start_ on every
-        // chunk), so only a truly dead transfer is abandoned.
-        if (elapsed >= kOscTimeout) to_ground();
+        // chunk), so only a truly dead transfer is abandoned. Mid image
+        // reply over ssh a packet can stall for seconds; give up then and
+        // its tail would arrive as typed text.
+        if (elapsed >= (osc5522_active_ ? kClipboardStall : kOscTimeout)) {
+            if (osc5522_active_) { draining_5522_ = true; drain_since_ = clock::now(); }
+            to_ground();
+        }
         break;
 
     case State::BracketedPaste:
@@ -486,6 +514,7 @@ void InputParser::reset() noexcept {
     pending_alt_ = false;
     in_burst_ = false;
     paste_tail_ = false;
+    draining_5522_ = false;
     utf8_remaining_ = 0;
     utf8_raw_.clear();
     osc5522_active_ = false;
