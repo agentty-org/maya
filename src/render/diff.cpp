@@ -289,7 +289,7 @@ void diff(
                 // and this stays a plain reset, which is correct: the
                 // terminal is meant to show through.
                 if (current_style != 0) {
-                    out.append(pool.sgr(0));
+                    pool.close_link(current_style, out); out.append(pool.sgr(0));
                     current_style = 0;
                 }
                 if (const Theme& th = theme::live(); theme::owns_canvas(th)) {
@@ -310,7 +310,7 @@ void diff(
                 // are already blank on screen.
                 flush_ascii();
                 if (current_style != 0) {
-                    out.append(pool.sgr(0));
+                    pool.close_link(current_style, out); out.append(pool.sgr(0));
                     current_style = 0;
                 }
                 for (std::size_t cx = first_diff; cx < trail_end; ++cx) {
@@ -330,6 +330,8 @@ void diff(
     }
     // Flush remaining ASCII.
     flush_ascii();
+    // a link left open would take in the cursor moves of the next frame
+    if (current_style != UINT16_MAX) pool.close_link(current_style, out);
 }
 
 // ============================================================================

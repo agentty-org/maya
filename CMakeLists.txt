@@ -656,6 +656,7 @@ if(MAYA_BUILD_TESTS)
         tests/test_blend_safety.cpp
         tests/test_canvas.cpp
         tests/test_diff.cpp
+        tests/test_links.cpp
         tests/test_diff_fidelity.cpp
         tests/test_writer_residue.cpp
         tests/test_grid_emit.cpp

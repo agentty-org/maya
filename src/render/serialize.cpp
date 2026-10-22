@@ -53,7 +53,7 @@ void serialize(const Canvas& canvas, const StylePool& pool,
         // is false), so this stays a plain reset and the terminal shows
         // through exactly as it should.
         if (current_style != 0) {
-            out.append(pool.sgr(0));
+            pool.close_link(current_style, out); out.append(pool.sgr(0));
             current_style = 0;
         }
         const Theme& th = theme::live();
@@ -81,6 +81,7 @@ void serialize(const Canvas& canvas, const StylePool& pool,
     }
 
     out += "\x1b[?7h";   // re-enable auto-wrap
+    if (links_used()) out += "\x1b]8;;\x1b\\";   // close any OSC 8 link
     out += ansi::reset;  // reset SGR at end of frame
 }
 
