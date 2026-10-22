@@ -121,7 +121,7 @@ struct FakeDevice {
 
     void set_title(std::string_view s)          { last_title = s; log.push_back("set_title"); }
     void write_clipboard(std::string_view s)    { last_clip = s;  log.push_back("write_clipboard"); }
-    void query_clipboard()                      { log.push_back("query_clipboard"); }
+    void query_clipboard(ClipboardDialect)      { log.push_back("query_clipboard"); }
     void emit_host_sequence(std::string_view s) { last_seq = s;   log.push_back("emit_host_sequence"); }
     void commit_scrollback(ScrollbackDebt)      { ++commits;      log.push_back("commit_scrollback"); }
     void commit_overflow()                      { ++overflows;    log.push_back("commit_overflow"); }

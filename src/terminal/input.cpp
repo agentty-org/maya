@@ -1128,7 +1128,13 @@ void InputParser::parse_osc5522(std::string_view body,
         return;
     }
 
-    if (!osc5522_active_) return;   // stray packet outside a transfer
+    // kitty answers a refused read with a lone `status=EPERM`, no OK first.
+    // That's still an answer: count it so the host can say what to fix.
+    if (!osc5522_active_) {
+        if (!status.empty() && status != "DATA" && status != "DONE")
+            clipboard_read_refused().fetch_add(1, std::memory_order_relaxed);
+        return;   // otherwise a stray packet outside a transfer
+    }
 
     if (status == "DATA") {
         auto mime = decode_base64(mime_b64);

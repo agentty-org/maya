@@ -370,7 +370,7 @@ public:
     // PasteEvent. The portable, remote-tool-free clipboard read used by
     // the SSH image-paste path. No-op effect on terminals that don't
     // honour OSC 52 reads (no reply ever arrives — host falls back).
-    void query_clipboard();
+    void query_clipboard(ClipboardDialect dialect = ClipboardDialect::automatic);
 
     // Emit an arbitrary, already-formed control sequence to the host
     // terminal, out-of-band with the frame renderer (see the emit_host_sequence effect

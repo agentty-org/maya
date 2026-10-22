@@ -20,6 +20,7 @@
 #include <jaal/jaal.hpp>
 
 #include "../render/scrollback_ledger.hpp"   // ScrollbackDebt
+#include "../terminal/input.hpp"             // ClipboardDialect
 
 namespace maya {
 
@@ -54,7 +55,10 @@ using write_clipboard = jaal::pure_fx<WriteClipboard, "write_clipboard">;
 
 /// Ask the terminal for its clipboard (OSC 52 read). The reply arrives as a
 /// PasteEvent, so subscribe with on_paste.
-struct QueryClipboard {};
+/// `dialect` picks OSC 5522 / OSC 52 (see ClipboardDialect).
+struct QueryClipboard {
+    ClipboardDialect dialect = ClipboardDialect::automatic;
+};
 using query_clipboard = jaal::pure_fx<QueryClipboard, "query_clipboard">;
 
 /// An already-formed control sequence for a cooperating HOST terminal

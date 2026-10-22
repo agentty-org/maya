@@ -212,7 +212,7 @@ public:
 
     void set_title(std::string_view t)             { rt_->set_title(t); }
     void write_clipboard(std::string_view s)       { rt_->write_clipboard(s); }
-    void query_clipboard()                         { rt_->query_clipboard(); }
+    void query_clipboard(ClipboardDialect d = ClipboardDialect::automatic) { rt_->query_clipboard(d); }
     void emit_host_sequence(std::string_view seq)  { rt_->emit_host_sequence(seq); }
     void commit_scrollback(ScrollbackDebt debt)    { rt_->commit_inline_prefix(debt.rows()); }
     void commit_overflow()                         { rt_->commit_inline_overflow(); invalidate(); }

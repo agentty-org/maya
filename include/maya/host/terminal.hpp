@@ -362,7 +362,7 @@ public:
     void handle(CommitScrollback c) { term_.commit_scrollback(c.debt); }
     void handle(SetTitle t)         { term_.set_title(t.title); }
     void handle(WriteClipboard w)   { term_.write_clipboard(w.text); }
-    void handle(QueryClipboard)     { term_.query_clipboard(); }
+    void handle(QueryClipboard q)   { term_.query_clipboard(q.dialect); }
     void handle(EmitHostSequence e) { term_.emit_host_sequence(e.sequence); }
     void handle(CommitOverflow)     { term_.commit_overflow(); dirty_ = true; }
     void handle(ForceRedraw)        { term_.force_redraw();    dirty_ = true; }

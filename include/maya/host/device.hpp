@@ -80,7 +80,7 @@ concept Device = requires(D d,
     // ── effects only a terminal can do ────────────────────────────────────
     { d.set_title(sv) };
     { d.write_clipboard(sv) };
-    { d.query_clipboard() };
+    { d.query_clipboard(ClipboardDialect::automatic) };
     { d.emit_host_sequence(sv) };
     { d.commit_scrollback(debt) };
     { d.commit_overflow() };

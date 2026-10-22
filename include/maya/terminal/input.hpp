@@ -50,6 +50,14 @@ namespace maya {
 // the setting, not "your terminal never answered".
 [[nodiscard]] std::atomic<std::uint64_t>& clipboard_read_refused() noexcept;
 
+// Which clipboard read to send.
+//   automatic  OSC 5522 if the terminal looks like it has it, else OSC 52;
+//              inside tmux both, wrapped for passthrough
+//   images     OSC 5522 only (kitty): images and text
+//   text       OSC 52 only: text
+// A host that knows which one the terminal speaks should say so: asking
+// both through tmux lets a text reply race the image.
+enum class ClipboardDialect : std::uint8_t { automatic, images, text };
 // ============================================================================
 // Key - all recognized key values
 // ============================================================================

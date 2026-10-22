@@ -101,7 +101,7 @@ void Device::write_clipboard(std::string_view text) {
     (void)writer_->write_or_buffer(seq);
 }
 
-void Device::query_clipboard() {
+void Device::query_clipboard(ClipboardDialect dialect) {
     // Clipboard read query. Two dialects:
     //   • OSC 5522 (kitty) — multi-format: the reply can carry IMAGE
     //     bytes, which OSC 52 read replies never do. kitty is the only
@@ -122,6 +122,14 @@ void Device::query_clipboard() {
     // as the text fallback for the non-kitty case. On kitty both may reply;
     // a short dedup window (see on paste handling) drops the second.
     const bool in_tmux = ansi::tmux_in_path();
+    // The host knows which one the terminal speaks: send only that, so a
+    // text reply can't race the image. Wrapped for tmux when it's in the path.
+    if (dialect != ClipboardDialect::automatic) {
+        const std::string q = dialect == ClipboardDialect::images ? ansi::request_clipboard_image()
+                                                                  : ansi::request_clipboard();
+        (void)writer_->write_or_buffer(in_tmux ? ansi::wrap_for_tmux(q) : q);
+        return;
+    }
     if (in_tmux) {
         (void)writer_->write_or_buffer(
             ansi::wrap_for_tmux(ansi::request_clipboard_image()));

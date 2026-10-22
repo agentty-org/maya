@@ -661,6 +661,16 @@ TEST_CASE("input paste routes deliver fully and report progress") {
     std::println("PASS\n");
 }
 
+TEST_CASE("input osc5522 refusal without OK is counted") {
+    // kitty refuses a read with a lone status=EPERM; no OK comes first.
+    InputParser p;
+    const auto before = clipboard_read_refused().load();
+    auto events = p.feed("\x1b]5522;type=read:status=EPERM\x1b\\");
+    assert(events.empty());
+    assert(clipboard_read_refused().load() == before + 1);
+    std::println("PASS\n");
+}
+
 TEST_CASE("input osc5522 text only") {
     std::println("--- test_input_osc5522_text_only ---");
     InputParser p;
