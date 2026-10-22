@@ -355,6 +355,29 @@ TEST_CASE("input unbracketed paste becomes one paste, typing stays keys") {
     std::println("PASS\n");
 }
 
+TEST_CASE("input frame acks inside a paste or clipboard reply are not data") {
+    std::println("--- test_input_acks_inside_paste ---");
+    // Every frame asks for a DSR; while a long paste or an OSC 5522 image
+    // reply streams in, the answer (ESC[0n) lands in the middle of it.
+    InputParser p;
+    const std::string body(6000, 'A');
+    auto ev = p.feed("\x1b[200~" + body.substr(0, 3000) + "\x1b[0n" + body.substr(3000) + "\x1b[201~");
+    const auto* pe = std::get_if<PasteEvent>(&ev[0]);
+    assert(pe && pe->content == body);
+    assert(p.take_acks() == 1);
+
+    InputParser q;
+    std::string r = "\x1b]5522;type=read:status=OK\x1b\\";
+    r += "\x1b]5522;type=read:status=DATA:mime=aW1hZ2UvcG5n;QU\x1b[0nJD\x1b\\";
+    r += "\x1b]5522;type=read:status=DONE\x1b\\";
+    auto e2 = q.feed(r);
+    std::string got;
+    for (auto& e : e2)
+        if (auto* x = std::get_if<PasteEvent>(&e)) got += x->content;
+    assert(got == "ABC");
+    std::println("PASS\n");
+}
+
 TEST_CASE("input osc52 clipboard text st") {
     std::println("--- test_input_osc52_clipboard_text_st ---");
     InputParser p;

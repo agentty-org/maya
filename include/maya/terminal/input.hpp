@@ -222,6 +222,9 @@ private:
     // it comes within kBurstGap. Short enough that a key you type after a
     // paste is a key, not more paste.
     bool in_burst_ = false;
+    // A bracketed paste was flushed by its timeout before ESC[201~ came:
+    // bytes up to that terminator are still paste.
+    bool paste_tail_ = false;
     clock::time_point last_burst_{};
     static constexpr auto kBurstGap = std::chrono::milliseconds(40);
     // After this long with nothing, a burst is over whatever comes next.

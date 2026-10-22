@@ -26,6 +26,29 @@ std::atomic<std::uint64_t>& clipboard_read_refused() noexcept {
 auto InputParser::feed(std::string_view bytes) -> std::vector<Event> {
     std::vector<Event> events;
 
+    // The rest of a bracketed paste whose stream stalled long enough that
+    // flush_timeout() already handed over the first part. Everything up to
+    // its ESC[201~ continues that paste; what follows is ordinary input.
+    if (paste_tail_ && state_ == State::Ground && !bytes.empty()) {
+        paste_tail_ = false;
+        const auto end = bytes.find("\x1b[201~");
+        const auto body = bytes.substr(0, end);
+        if (!body.empty()) {
+            clipboard_rx_bytes().fetch_add(body.size(), std::memory_order_relaxed);
+            events.emplace_back(PasteEvent{std::string(body), /*unbracketed=*/false, /*continues=*/true});
+        }
+        if (end == std::string_view::npos) {
+            paste_tail_ = true;   // still no terminator: keep going
+            return events;
+        }
+        bytes.remove_prefix(end + 6);
+        in_burst_ = false;
+        if (bytes.empty()) return events;
+        auto rest = feed(bytes);
+        for (auto& e : rest) events.push_back(std::move(e));
+        return events;
+    }
+
     // A terminal without bracketed paste (or one that drops the markers,
     // like some over ssh) delivers a paste as plain bytes. One read holding
     // a long run of them is not typing; nobody types that fast. Hand it over
@@ -39,7 +62,7 @@ auto InputParser::feed(std::string_view bytes) -> std::vector<Event> {
     // if it came quickly, so a key typed after a paste stays a key.
     if (in_burst_ && bytes.size() < kUnbracketedPasteMin && now - last_burst_ > kBurstGap)
         in_burst_ = false;
-    if (in_burst_ && now - last_burst_ > kBurstIdle) in_burst_ = false;
+    if (in_burst_ && now - last_burst_ > kBurstIdle && !paste_tail_) in_burst_ = false;
     if (state_ == State::Ground && !bytes.empty()
         && (bytes.size() >= kUnbracketedPasteMin || in_burst_)) {
         bool plain = true;
@@ -210,6 +233,18 @@ auto InputParser::feed(std::string_view bytes) -> std::vector<Event> {
                 break;
             }
             buf_ += static_cast<char>(ch);
+            // A frame's DSR reply (ESC[0n) can land inside a long OSC reply
+            // (a clipboard image streaming in): it's an ack, not OSC data.
+            // Left in, its ESC breaks the reply and the rest of the image
+            // arrives as typed text.
+            if (ch == 'n' && buf_.size() >= 4) {
+                const auto tail = std::string_view(buf_).substr(buf_.size() - 4);
+                if (tail == "\x1b[0n" || tail == "\x1b[3n") {
+                    buf_.resize(buf_.size() - 4);
+                    ++acks_;
+                    break;
+                }
+            }
             // OSC is terminated by BEL (0x07) or ST (ESC \)
             if (ch == 0x07) {
                 parse_osc(events);
@@ -267,6 +302,19 @@ auto InputParser::feed(std::string_view bytes) -> std::vector<Event> {
 
         case State::BracketedPaste:
             buf_ += static_cast<char>(ch);
+            // The screen asks for a DSR after every frame (flow control), and
+            // a frame drawn while a long paste streams in puts the terminal's
+            // reply (ESC[0n) in the middle of the paste bytes. It is an ack,
+            // not paste: take it out, or it corrupts the paste (an image sent
+            // as text no longer decodes).
+            if (ch == 'n' && buf_.size() >= 4) {
+                const auto tail = std::string_view(buf_).substr(buf_.size() - 4);
+                if (tail == "\x1b[0n" || tail == "\x1b[3n") {
+                    buf_.resize(buf_.size() - 4);
+                    ++acks_;
+                    break;
+                }
+            }
             // Look for the terminator: ESC [201~
             if (buf_.size() >= 6) {
                 auto tail = std::string_view(buf_).substr(buf_.size() - 6);
@@ -351,7 +399,14 @@ auto InputParser::flush_timeout() -> std::vector<Event> {
     case State::Escape:
         // The classic lone-ESC disambiguation: no second byte arrived, so
         // it really was the Escape key (Alt+Escape after a double-ESC).
-        if (elapsed >= escape_timeout_) {
+        //
+        // Except mid clipboard reply. An OSC 5522 image reply is a train of
+        // packets, and over ssh a read can end right after the ESC that
+        // starts the next one, with the rest landing well after 50 ms.
+        // Taking that ESC as the Escape key throws the parser out of the
+        // reply and the rest of the image arrives as thousands of typed
+        // characters. While a reply is open, wait as long as for any OSC.
+        if (elapsed >= (osc5522_active_ ? kOscTimeout : escape_timeout_)) {
             events.emplace_back(KeyEvent{
                 .key = SpecialKey::Escape,
                 .mods = {.alt = pending_alt_},
@@ -404,6 +459,13 @@ auto InputParser::flush_timeout() -> std::vector<Event> {
                 events.emplace_back(PasteEvent{std::move(buf_)});
             }
             to_ground();
+            // The stream may only have stalled (a slow ssh link): if more
+            // arrives, it is the rest of this paste, not typing, and its
+            // ESC[201~ must not leak. paste_tail_ makes feed() hand it on
+            // as a continuation.
+            paste_tail_ = true;
+            in_burst_ = true;
+            last_burst_ = clock::now();
         }
         break;
 
@@ -422,6 +484,8 @@ void InputParser::reset() noexcept {
     state_ = State::Ground;
     buf_.clear();
     pending_alt_ = false;
+    in_burst_ = false;
+    paste_tail_ = false;
     utf8_remaining_ = 0;
     utf8_raw_.clear();
     osc5522_active_ = false;
