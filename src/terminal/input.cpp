@@ -26,6 +26,38 @@ std::atomic<std::uint64_t>& clipboard_read_refused() noexcept {
 auto InputParser::feed(std::string_view bytes) -> std::vector<Event> {
     std::vector<Event> events;
 
+    // A terminal without bracketed paste (or one that drops the markers,
+    // like some over ssh) delivers a paste as plain bytes. One read holding
+    // a long run of them is not typing; nobody types that fast. Hand it over
+    // as one PasteEvent so the app shows it as a paste, not thousands of
+    // keystrokes dumped into the input. A big paste comes in several reads;
+    // each is its own event, marked unbracketed, and the app joins them. A
+    // short read right after such a burst (its tail) is part of it too.
+    const auto now = clock::now();
+    // A big read right after a burst is more of it however long the reader
+    // took (a busy app reads a large paste slowly). A small one only counts
+    // if it came quickly, so a key typed after a paste stays a key.
+    if (in_burst_ && bytes.size() < kUnbracketedPasteMin && now - last_burst_ > kBurstGap)
+        in_burst_ = false;
+    if (in_burst_ && now - last_burst_ > kBurstIdle) in_burst_ = false;
+    if (state_ == State::Ground && !bytes.empty()
+        && (bytes.size() >= kUnbracketedPasteMin || in_burst_)) {
+        bool plain = true;
+        for (unsigned char c : bytes)
+            if (c == 0x1b || (c < 0x20 && c != '\n' && c != '\r' && c != '\t')) { plain = false; break; }
+        if (plain) {
+            const bool continues = in_burst_;
+            // Reads come in whatever sizes the pty hands over (a 4 KB write
+            // can arrive as 4095 + 1), so a short read doesn't end the burst;
+            // only a quiet gap of kBurstGap does.
+            in_burst_ = true;
+            last_burst_ = now;
+            events.emplace_back(PasteEvent{std::string(bytes), /*unbracketed=*/true, continues});
+            return events;
+        }
+    }
+    in_burst_ = false;
+
     for (size_t i = 0; i < bytes.size(); ++i) {
         auto ch = static_cast<uint8_t>(bytes[i]);
 

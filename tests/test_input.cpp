@@ -321,6 +321,37 @@ TEST_CASE("input bracketed paste") {
     const auto* pe = std::get_if<PasteEvent>(&events[0]);
     assert(pe != nullptr);
     assert(pe->content == "hello paste");
+    assert(!pe->unbracketed);
+    std::println("PASS\n");
+}
+
+TEST_CASE("input unbracketed paste becomes one paste, typing stays keys") {
+    std::println("--- test_input_unbracketed_paste ---");
+    // A terminal without bracketed paste sends the text as plain bytes,
+    // read by read. Each big read is a PasteEvent; the later ones say they
+    // continue the first, so the app joins them into one paste.
+    InputParser p;
+    const std::string a(4095, 'x'), b(4095, 'y');
+    auto e1 = p.feed(a);
+    assert(e1.size() == 1);
+    const auto* p1 = std::get_if<PasteEvent>(&e1[0]);
+    assert(p1 && p1->unbracketed && !p1->continues && p1->content == a);
+    auto e2 = p.feed("z");   // a 4096-byte write split 4095 + 1
+    const auto* p2 = std::get_if<PasteEvent>(&e2[0]);
+    assert(p2 && p2->continues && p2->content == "z");
+    auto e3 = p.feed(b);
+    const auto* p3 = std::get_if<PasteEvent>(&e3[0]);
+    assert(p3 && p3->continues);
+
+    // Typing: short reads, no burst before them, stay keystrokes.
+    InputParser q;
+    auto k = q.feed("hi");
+    assert(k.size() == 2 && std::holds_alternative<KeyEvent>(k[0]));
+    // A long read with a control key in it is not a paste either.
+    std::string ctl(100, 'a');
+    ctl[50] = '\x01';
+    auto c = q.feed(ctl);
+    assert(std::holds_alternative<KeyEvent>(c[0]));
     std::println("PASS\n");
 }
 

@@ -137,6 +137,11 @@ struct MouseEvent {
 
 struct PasteEvent {
     std::string content;
+    // Not from a bracketed paste: a burst of plain bytes taken as one.
+    bool unbracketed = false;
+    // The next read of the same unbracketed burst (it arrived right after
+    // the previous one). The app should append it to that paste.
+    bool continues = false;
 };
 
 struct FocusEvent {
@@ -209,6 +214,18 @@ private:
     static constexpr auto escape_timeout_ = std::chrono::milliseconds(50);
     static constexpr auto kOscTimeout     = std::chrono::milliseconds(1000);
     static constexpr auto kPasteTimeout   = std::chrono::milliseconds(2000);
+    // A single read of at least this many plain bytes (no escapes, no
+    // control keys) is taken as an unbracketed paste. Typing, even key
+    // repeat, never puts this much into one read.
+    static constexpr std::size_t kUnbracketedPasteMin = 64;
+    // The last read was part of an unbracketed paste, so more may follow if
+    // it comes within kBurstGap. Short enough that a key you type after a
+    // paste is a key, not more paste.
+    bool in_burst_ = false;
+    clock::time_point last_burst_{};
+    static constexpr auto kBurstGap = std::chrono::milliseconds(40);
+    // After this long with nothing, a burst is over whatever comes next.
+    static constexpr auto kBurstIdle = std::chrono::milliseconds(1000);
 
     // Upper bound on a single OSC string's accumulated length. OSC 52
     // clipboard responses can carry a base64 image (the terminal reads
