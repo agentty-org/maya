@@ -84,17 +84,43 @@ auto InputParser::feed(std::string_view bytes) -> std::vector<Event> {
     const bool stripped_reply = bytes.find("5522;type=read:status=") != std::string_view::npos;
     if (state_ == State::Ground && !bytes.empty()
         && (bytes.size() >= kUnbracketedPasteMin || in_burst_ || stripped_reply)) {
-        bool plain = true;
-        for (unsigned char c : bytes)
+        // We ask the terminal for a DSR after every frame, so its ack
+        // (ESC[0n) can land in the middle of a read of pasted bytes. Take
+        // those out first: left in, the read isn't "plain", and the whole
+        // read (kilobytes of an image sent as text) would be typed in as keys.
+        std::string cleaned;
+        std::string_view body = bytes;
+        int acks = 0;
+        if (bytes.find('\x1b') != std::string_view::npos) {
+            cleaned.reserve(bytes.size());
+            for (std::size_t i = 0; i < bytes.size();) {
+                const auto rest = bytes.substr(i);
+                if (rest.starts_with("\x1b[0n") || rest.starts_with("\x1b[3n")) {
+                    ++acks;
+                    i += 4;
+                    continue;
+                }
+                cleaned += bytes[i++];
+            }
+            body = cleaned;
+        }
+        bool plain = !body.empty();
+        for (unsigned char c : body)
             if (c == 0x1b || (c < 0x20 && c != '\n' && c != '\r' && c != '\t')) { plain = false; break; }
-        if (plain) {
+        if (plain && (body.size() >= kUnbracketedPasteMin || in_burst_ || stripped_reply)) {
+            acks_ += acks;
             const bool continues = in_burst_;
             // Reads come in whatever sizes the pty hands over (a 4 KB write
             // can arrive as 4095 + 1), so a short read doesn't end the burst;
             // only a quiet gap of kBurstGap does.
             in_burst_ = true;
             last_burst_ = now;
-            events.emplace_back(PasteEvent{std::string(bytes), /*unbracketed=*/true, continues});
+            events.emplace_back(PasteEvent{std::string(body), /*unbracketed=*/true, continues});
+            return events;
+        }
+        // Only acks, mid-burst: they're acks, and the paste goes on.
+        if (body.empty() && in_burst_) {
+            acks_ += acks;
             return events;
         }
     }

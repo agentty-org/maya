@@ -661,6 +661,29 @@ TEST_CASE("input paste routes deliver fully and report progress") {
     std::println("PASS\n");
 }
 
+TEST_CASE("input unbracketed paste with a frame ack inside is still paste") {
+    // A frame's DSR reply lands in the middle of a big pasted read: it must be
+    // counted as an ack and taken out, not turn the whole read into keys.
+    InputParser p;
+    std::string a(2000, 'A'), b(2000, 'B');
+    auto events = p.feed(a + "\x1b[0n" + b);
+    REQUIRE(events.size() == 1);
+    const auto* pe = std::get_if<PasteEvent>(&events[0]);
+    REQUIRE(pe != nullptr);
+    CHECK(pe->content == a + b);
+    CHECK(pe->unbracketed);
+    CHECK(p.take_acks() == 1);
+    // An ack on its own in the middle of the burst is an ack, the paste goes on.
+    auto ev2 = p.feed("\x1b[0n");
+    CHECK(ev2.empty());
+    CHECK(p.take_acks() == 1);
+    auto ev3 = p.feed(std::string(100, 'C'));
+    REQUIRE(ev3.size() == 1);
+    const auto* pe3 = std::get_if<PasteEvent>(&ev3[0]);
+    REQUIRE(pe3 != nullptr);
+    CHECK(pe3->continues);
+}
+
 TEST_CASE("input osc5522 refusal without OK is counted") {
     // kitty refuses a read with a lone status=EPERM; no OK comes first.
     InputParser p;
