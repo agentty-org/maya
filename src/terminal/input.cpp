@@ -78,8 +78,12 @@ auto InputParser::feed(std::string_view bytes) -> std::vector<Event> {
     if (in_burst_ && bytes.size() < kUnbracketedPasteMin && now - last_burst_ > kBurstGap)
         in_burst_ = false;
     if (in_burst_ && now - last_burst_ > kBurstIdle && !paste_tail_) in_burst_ = false;
+    // A clipboard reply whose ESC bytes were stripped on the way (seen with
+    // some tmux/ssh setups) is still a reply, not typing: hand it over as
+    // paste input so the app can recognise it, however short the read.
+    const bool stripped_reply = bytes.find("5522;type=read:status=") != std::string_view::npos;
     if (state_ == State::Ground && !bytes.empty()
-        && (bytes.size() >= kUnbracketedPasteMin || in_burst_)) {
+        && (bytes.size() >= kUnbracketedPasteMin || in_burst_ || stripped_reply)) {
         bool plain = true;
         for (unsigned char c : bytes)
             if (c == 0x1b || (c < 0x20 && c != '\n' && c != '\r' && c != '\t')) { plain = false; break; }
