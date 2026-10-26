@@ -459,8 +459,8 @@ inline std::vector<const Theme*>& intern_table() {
 
 // The stable address for `t`'s VALUE. Returns the existing entry when this
 // theme has been seen before, so N swaps between two themes allocate twice.
-[[nodiscard]] inline const Theme* intern(const Theme& t) {
-    std::lock_guard lk(intern_mu());
+// Caller holds intern_mu().
+[[nodiscard]] inline const Theme* intern_locked(const Theme& t) {
     auto& tab = intern_table();
     for (const Theme* p : tab)
         if (*p == t) return p;
@@ -493,14 +493,14 @@ inline std::vector<const Theme*>& intern_table() {
 /// half-themed surface that looks deliberate.
 [[nodiscard]] inline bool try_set_live(const Theme& t) noexcept {
     if (!t.complete()) return false;
-    const Theme* p = detail::intern(t);
-
-    // Theme first, THEN the epoch, with release ordering. That order is the
-    // contract projected<P>() relies on: a reader that observes epoch N+1 is
-    // guaranteed to see the theme that produced it, so it can never cache an
-    // OLD projection under a NEW epoch and go permanently stale. The reverse
-    // race — observing the new theme under the old epoch — costs one
-    // redundant re-derive and converges.
+    // Theme first, THEN the epoch, with release ordering: a reader that sees
+    // epoch N+1 sees the theme that produced it. That only holds if the two
+    // stores of one writer can't interleave with another's (A stores its
+    // theme, B stores its theme and bumps, A bumps: a reader of A's epoch may
+    // read A's theme while B's is current, and cache a stale projection for
+    // good). So writers take intern_mu() across the pair. Readers never lock.
+    std::lock_guard lk(detail::intern_mu());
+    const Theme* p = detail::intern_locked(t);
     detail::live_slot().store(p, std::memory_order_release);
     detail::epoch_slot().fetch_add(1, std::memory_order_release);
     return true;
@@ -579,7 +579,10 @@ struct ProjectionState {
         return s;
     }
     static std::atomic<unsigned>& seen() {
-        static std::atomic<unsigned> e{live_epoch()};
+        // No epoch is ever ~0u, so the first projected() re-derives. Starting
+        // at live_epoch() let a theme change between this and slot()'s init
+        // cache the old projection under the new epoch, for good.
+        static std::atomic<unsigned> e{~0u};
         return e;
     }
 };

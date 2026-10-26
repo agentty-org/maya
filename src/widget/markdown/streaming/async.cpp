@@ -109,8 +109,10 @@ void StreamingMarkdown::spawn_async_worker_(std::shared_ptr<std::string> source)
 
     // On the runtime's pool via maya::exec, joined before maya::run returns
     // (inline with no runtime). The slot is co-owned by the job, so a
-    // StreamingMarkdown destroyed mid-parse just drops its copy.
-    exec::post([slot]() mutable {
+    // StreamingMarkdown destroyed mid-parse just drops its copy. The body is
+    // a plain function: it reaches the slot and nothing else.
+    exec::post<AsyncResult>(+[](AsyncResult& slot_ref) {
+        AsyncResult* slot = &slot_ref;
         // The slot retains the source for the entire task; using a
         // reference avoids a second full-buffer copy in the thread closure.
         const std::string& src = *slot->source;
@@ -255,7 +257,7 @@ void StreamingMarkdown::spawn_async_worker_(std::shared_ptr<std::string> source)
         // Publish: release-store on `ready` so the foreground's
         // acquire-load sees the populated vectors above.
         slot->ready.store(true, std::memory_order_release);
-    });
+    }, slot);
 }
 
 void StreamingMarkdown::maybe_apply_async_() const {

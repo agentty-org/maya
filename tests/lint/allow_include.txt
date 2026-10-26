@@ -66,7 +66,10 @@ style/theme.hpp: atomic mutex
 element/element.hpp: atomic thread_local
 core/motion.hpp: atomic thread_local
 core/anim_clock.hpp: atomic
-terminal/terminal.hpp: atomic
+# call_once: installs the emergency terminate/atexit/signal hooks once per
+# process. The body is sigaction + set_terminate; it takes no lock and waits
+# on nothing, and maya's core can't use jaal::once (tests/seam.sh).
+terminal/terminal.hpp: atomic call_once
 terminal/input.hpp: atomic
 
 # ── The markdown async result slot ───────────────────────────────────────
@@ -85,13 +88,16 @@ element/pixels.hpp: thread_local
 # in maya::run after jaal::run has returned, so nothing is held.
 # parallel_for runs on warm pool workers; the atomics are its index and done
 # counters (fetch_add + wait/notify, no lock), co-owned by the jobs so a late
-# worker never touches a dead frame.
-host/executor.hpp: atomic cap_mint
+# worker never touches a dead frame. The caller's wait (atomic_wait) is for
+# helpers that only run fn and decrement: it is called from a view, which
+# holds no lock, and the helpers take none.
+host/executor.hpp: atomic cap_mint atomic_wait
 # runtime.hpp's test_root(): the program-lifetime root a TEST SUITE hands its
 # test bodies (each a thread root that holds nothing between statements).
 # Product code never calls it; agentty's mint lint scans src/ and include/
-# and would flag a use there.
-runtime.hpp: cap_mint
+# and would flag a use there. `loop_arm`: arm_loop_for_tests(), the same
+# deal for a test main that drives view code with no kernel.
+runtime.hpp: cap_mint loop_arm
 
 # ── P5. const_cast: memoization behind a const accessor ──────────────────
 # The logical-const pattern — filling a cache slot inside a const getter,

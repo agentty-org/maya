@@ -39,6 +39,7 @@
 #include <jaal/kernel/snapshot.hpp>
 #include <jaal/kernel/stop_group.hpp>
 #include <jaal/kernel/strays.hpp>
+#include <jaal/kernel/waits_for.hpp>
 #include <jaal/kernel/worker_group.hpp>
 #include <jaal/platform/clock.hpp>
 #include <jaal/platform/concepts.hpp>
@@ -124,6 +125,8 @@ using ::jaal::parallel_for;     // a borrowed body over [0, n), joined before it
 template <class T> using snapshot = ::jaal::snapshot<T>;  // read-mostly value, no lock at all
 using ::jaal::nursery;
 using pool       = ::jaal::kernel::pool;        // owned worker threads
+template <class R>
+using job_result = ::jaal::kernel::job_result<R>;   // pool::submit's result; get(unlocked)
 using stop_group = ::jaal::kernel::stop_group;  // cancel or await work
 using ::jaal::strays;                           // threads a shutdown gave up on, still running
 using worker_group = ::jaal::kernel::worker_group;  // owned jobs, barrier stop
@@ -131,11 +134,20 @@ using ::jaal::kernel::CheckedJob;               // captureless body, Sendable ar
 using ::jaal::kernel::require_job;
 using ::jaal::kernel::delay_for;                // a sleep that wakes on stop
 using ::jaal::kernel::backoff_for;              // a short capped pause, legal under a lock
+// The std library's blocking waits, held to the same rule (need unlocked).
+using ::jaal::wait;                             // future.get()
+using ::jaal::wait_for;                         // future.wait_for(d)
+using ::jaal::once;                             // std::call_once
+using ::jaal::atomic_wait;                      // atomic::wait(old)
 using ::jaal::kernel::loop_bound;               // state only the loop touches
 using ::jaal::kernel::published;                // the current object, swapped whole
-using ::jaal::kernel::loop_identity;
 using ::jaal::kernel::on_loop;          // is this thread a kernel's loop?
 using ::jaal::kernel::loop_token;
+// A test main that drives view code with no kernel arms its thread with
+// this. The banlist flags the name anywhere but a test.
+[[nodiscard]] inline ::jaal::kernel::loop_identity arm_loop_for_tests() noexcept {
+    return ::jaal::kernel::loop_identity::for_tests();
+}
 
 // ── Platform: processes, polling, locks, the clock ──────────────────────
 namespace platform {

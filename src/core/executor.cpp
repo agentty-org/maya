@@ -31,7 +31,7 @@ void parallel_for(std::size_t n, const std::function<void(std::size_t)>& fn) {
     for (std::size_t i = 0; i < n; ++i) fn(i);   // no runtime: run inline
 }
 
-void post(std::function<void()> job) {
+void post_erased(std::function<void()> job) {
     if (auto e = current(); e && e->post) { e->post(std::move(job)); return; }
     job();                                        // no runtime: run inline
 }

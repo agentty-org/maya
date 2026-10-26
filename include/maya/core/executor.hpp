@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <memory>
 
 namespace maya::exec {
 
@@ -33,6 +34,19 @@ void install(Executor e);
 
 // The installed executor's operations, or inline fallbacks.
 void parallel_for(std::size_t n, const std::function<void(std::size_t)>& fn);
-void post(std::function<void()> job);
+
+// The type-erased form post() wraps. Not for direct use.
+void post_erased(std::function<void()> job);
+
+// Run body(*state) in the background. The body is a plain function pointer,
+// so it can't capture `this` or a reference into the caller's frame: the
+// only thing it reaches is `state`, which the job co-owns, so the caller may
+// be destroyed mid-job. Whatever in S both sides touch must synchronise
+// itself (an atomic flag published after the writes, say); that one rule is
+// what remains the caller's to keep.
+template <class S>
+void post(void (*body)(S&), std::shared_ptr<S> state) {
+    post_erased([body, s = std::move(state)] { body(*s); });
+}
 
 }  // namespace maya::exec
