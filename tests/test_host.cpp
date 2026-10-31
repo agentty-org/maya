@@ -127,6 +127,8 @@ struct FakeDevice {
     void commit_overflow()                      { ++overflows;    log.push_back("commit_overflow"); }
     void force_redraw()                         { ++redraws;      log.push_back("force_redraw"); }
     void reset_inline()                         { ++resets;       log.push_back("reset_inline"); }
+    void set_scrollback_replay(ScrollbackReplay s) { replay = std::move(s); log.push_back("set_scrollback_replay"); }
+    ScrollbackReplay replay;
     void set_mouse(bool on)                     { mouse_on = on;  log.push_back("set_mouse"); }
 };
 

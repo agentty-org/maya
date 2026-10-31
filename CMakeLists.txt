@@ -235,6 +235,7 @@ set(MAYA_LIB_SOURCES
     src/render/inline_frame.cpp
     src/render/canvas_witness.cpp
     src/render/scrollback_ledger.cpp
+    src/render/scrollback_replay.cpp
     src/widget/panel.cpp
     # markdown widget — three modules: parser / render / streaming
     # (component layout: src/widget/markdown/LAYOUT.md)
@@ -897,7 +898,8 @@ set_tests_properties(
         endif()
 
         set(_maya_posix_tests test_inline_frame test_composer_caret_shrink
-            test_tmux_capabilities test_fresh_oversized_scrollback)
+            test_tmux_capabilities test_fresh_oversized_scrollback
+            test_scrollback_replay)
         if(NOT APPLE)
             list(APPEND _maya_posix_tests test_terminal_restore)
         endif()

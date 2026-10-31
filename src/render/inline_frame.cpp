@@ -206,7 +206,8 @@ RenderOutcome InlineFrame<HardReset>::render(
     TermRows term_h,
     const StylePool& pool,
     Writer& writer,
-    bool synchronized_output) &&
+    bool synchronized_output,
+    std::string_view history) &&
 {
     // Fold the wipe and the fresh repaint into ONE atomic frame.
     //
@@ -230,10 +231,23 @@ RenderOutcome InlineFrame<HardReset>::render(
     // wipe+repaint — same retry semantics as the old separate-write
     // path, minus the orphaned-wipe window where a failed body left a
     // blank screen on the wire.
+    //
+    // `history` (scrollback replay) goes right after the wipe: rows of the
+    // host's older content at the new width, each ending in \r\n. They
+    // scroll off the top into real scrollback, and the live frame then
+    // paints from the row the history left the cursor on, all in the same
+    // synchronized frame.
     InlineFrame<Fresh> fresh{};
+    if (history.empty())
+        return std::move(fresh).render(canvas, rows, term_h, pool, writer,
+                                       synchronized_output,
+                                       "\x1b[2J\x1b[3J\x1b[H");
+    std::string prefix;
+    prefix.reserve(history.size() + 16);
+    prefix += "\x1b[2J\x1b[3J\x1b[H";
+    prefix += history;
     return std::move(fresh).render(canvas, rows, term_h, pool, writer,
-                                   synchronized_output,
-                                   "\x1b[2J\x1b[3J\x1b[H");
+                                   synchronized_output, prefix);
 }
 
 InlineFrame<Sealed> InlineFrame<HardReset>::finalize(std::string&) && noexcept {

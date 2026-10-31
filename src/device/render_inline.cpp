@@ -719,9 +719,28 @@ auto Device::render_inline(const Element& root, int w) -> Status {
                     emit_sync_wrapper_));
             }
             else if constexpr (std::is_same_v<T, InlineFrame<HardReset>>) {
+                // A width change wiped the terminal's scrollback. If the
+                // host gave us its history, bring it back at the new width
+                // in this same frame (see scrollback_replay.hpp).
+                std::string history;
+                if (replay_owed_ && (replay_.blocks || replay_.chunk)) {
+                    replay_owed_ = false;
+                    const auto t0 = std::chrono::steady_clock::now();
+                    auto got = replay::render_history(replay_, canvas_.width(), theme_);
+                    history = std::move(got.bytes);
+                    last_replay_ = ReplayStats{
+                        got.rows, got.blocks, got.cached, got.capped,
+                        history.size(),
+                        std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - t0).count()};
+                    io_log("scrollback replay: rows=%d blocks=%d cached=%d capped=%d bytes=%zu ms=%.1f build_ms=%.1f",
+                           got.rows, got.blocks, got.cached, got.capped ? 1 : 0,
+                           history.size(), last_replay_.ms, got.build_ms);
+                }
+                replay_owed_ = false;
                 return lift(std::move(arm).render(
                     canvas_, rows, term_h, pool_, *writer_,
-                    emit_sync_wrapper_));
+                    emit_sync_wrapper_, history));
             }
             else {
                 static_assert(std::is_same_v<T, InlineFrame<Sealed>>);

@@ -86,6 +86,7 @@ concept Device = requires(D d,
     { d.commit_overflow() };
     { d.force_redraw() };
     { d.reset_inline() };
+    { d.set_scrollback_replay(ScrollbackReplay{}) };
     { d.set_mouse(on) };
 };
 

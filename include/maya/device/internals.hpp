@@ -45,6 +45,7 @@
 #include "../render/inline_frame.hpp"
 #include "../render/pipeline.hpp"
 #include "../render/renderer.hpp"
+#include "../render/scrollback_replay.hpp"
 #include "../render/serialize.hpp"
 #include "../style/theme.hpp"
 #include "../terminal/input.hpp"
@@ -598,6 +599,24 @@ public:
         }
         // Empty/Fresh/HardReset/Sealed: nothing to demote — Empty/Fresh
         // already repaint cleanly, HardReset is already armed.
+        //
+        // The wipe takes the host's scrollback with it; a host with a replay
+        // source gets its history back in the same frame (a thread switch
+        // lands with the whole thread scrollable, not just the live window).
+        replay_owed_ = true;
+    }
+
+    // ── Scrollback replay (render/scrollback_replay.hpp) ────────────────
+    // Register the host's history source. Read on the UI thread, only on a
+    // frame that wipes scrollback (a width change or reset_inline).
+    void set_scrollback_replay(ScrollbackReplay src) { replay_ = std::move(src); }
+    // Ask for a replay on the next frame even without a reset (a stream
+    // that was live during the resize just settled; its rows changed).
+    // Promotes the next frame to a hard reset.
+    void request_scrollback_replay() noexcept { reset_inline(); }
+    // What the last replay did, for host logging. rows == 0 until one ran.
+    [[nodiscard]] const ReplayStats& last_scrollback_replay() const noexcept {
+        return last_replay_;
     }
 
     // True iff the underlying writer is holding undelivered bytes from a
@@ -739,6 +758,14 @@ private:
     Canvas                          canvas_;
     std::string                     out_;
     std::vector<layout::LayoutNode> layout_nodes_;
+
+    // Scrollback replay (scrollback_replay.hpp). The host's history source;
+    // owed after a width change wipes scrollback, paid by the next HardReset
+    // frame. Only a width change owes one: other resets (write failure,
+    // reset_inline) either keep their own history or wipe on purpose.
+    ScrollbackReplay                replay_;
+    bool                            replay_owed_ = false;
+    ReplayStats                     last_replay_;
 
     // ── Grid render backend (RenderBackend::Grid) ─────────────────────────
     // A parallel output path for a cooperating host: emit the cell diff as a

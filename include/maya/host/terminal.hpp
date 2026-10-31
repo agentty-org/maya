@@ -43,8 +43,21 @@
 #include "effects.hpp"            // what only the terminal can do
 #include "sources.hpp"            // what the terminal reports
 #include "device.hpp"             // the device surface this host drives
+#include "../render/scrollback_replay.hpp"
 
 namespace maya {
+
+// Optional Program hook: the history above the live canvas, for scrollback
+// replay after a width change (render/scrollback_replay.hpp).
+//
+//   static std::vector<ReplayBlock> scrollback_history(const Model& m);
+//   static std::pair<int, std::size_t> scrollback_limits(const Model& m); // optional
+//
+// Called on the UI thread, only on a frame that wipes scrollback.
+template <class P>
+concept HasScrollbackHistory = requires(const typename P::Model& m) {
+    { P::scrollback_history(m) } -> std::convertible_to<std::vector<ReplayBlock>>;
+};
 
 // The terminal's events (terminal_events), its effects (set_title,
 // commit_scrollback, suspend, ...), the Program concept and keymap all come
@@ -220,6 +233,29 @@ public:
     template <class K>
     void present(K& k) {
         resolved_ = false;
+        // Scrollback replay: a program that can rebuild its history above the
+        // live canvas declares `scrollback_history(model)`; the device calls
+        // it only on a frame that wipes scrollback (render/scrollback_replay.hpp).
+        // Registered once, on the first present, when the kernel exists.
+        if constexpr (HasScrollbackHistory<P>) {
+            if (!replay_registered_) {
+                replay_registered_ = true;
+                ScrollbackReplay src;
+                src.blocks = [&k] { return P::scrollback_history(k.model()); };
+                if constexpr (requires(std::size_t c) { P::scrollback_history_chunk(k.model(), c); })
+                    src.chunk = [&k](std::size_t cursor) {
+                        return P::scrollback_history_chunk(k.model(), cursor);
+                    };
+                if constexpr (requires { P::scrollback_wrap(std::declval<Element>()); })
+                    src.wrap = [](Element e) { return P::scrollback_wrap(std::move(e)); };
+                if constexpr (requires { P::scrollback_limits(k.model()); }) {
+                    const auto lim = P::scrollback_limits(k.model());
+                    src.max_rows  = lim.first;
+                    src.max_bytes = lim.second;
+                }
+                term_.set_scrollback_replay(std::move(src));
+            }
+        }
         // A lone ESC (or a truncated sequence) that nothing followed: the
         // parser can only call it the Escape key once 50 ms have passed
         // with no next byte, and no byte means no input wakeup. wait_hint()
@@ -465,6 +501,7 @@ private:
     bool                                                      resolved_ = false;   // a timed-out sequence was just emitted
     bool                                                      owed_  = false;   // a frame held back by pending output
     bool                                                      last_warmup_ = false;
+    bool                                                      replay_registered_ = false;
     std::optional<clock::time_point>                          next_frame_at_;
     std::chrono::nanoseconds                                  frame_period_;   // 0 = event-driven
     bool                                                      interrupt_exit_ = true;   // unhandled ^C exits 130

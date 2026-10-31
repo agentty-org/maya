@@ -217,6 +217,10 @@ public:
     void commit_scrollback(ScrollbackDebt debt)    { rt_->commit_inline_prefix(debt.rows()); }
     void commit_overflow()                         { rt_->commit_inline_overflow(); invalidate(); }
     void reset_inline()                            { rt_->reset_inline(); invalidate(); }
+    void set_scrollback_replay(ScrollbackReplay s) { rt_->set_scrollback_replay(std::move(s)); }
+    [[nodiscard]] const ReplayStats& last_scrollback_replay() const noexcept {
+        return rt_->last_scrollback_replay();
+    }
     void force_redraw()                            { rt_->force_redraw(); invalidate(); }
     void set_mouse(bool on)                        { rt_->apply_mouse(on); }
 

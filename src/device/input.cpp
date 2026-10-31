@@ -28,7 +28,9 @@ void Device::handle_resize() {
         //     (every row's wrap points and column layout shift). The
         //     row-diff can't reuse any of it, so we HardReset: next
         //     render emits \x1b[2J\x1b[3J\x1b[H and repaints fresh.
-        //     Destructive to host scrollback, but unavoidable.
+        //     The wipe takes the terminal's scrollback; a host with a
+        //     replay source gets its history back, rewrapped at the new
+        //     width, in the same frame (render/scrollback_replay.hpp).
         //
         //   • Height-only change — same width means every cached row
         //     is still byte-valid; only the viewport's vertical extent
@@ -48,6 +50,7 @@ void Device::handle_resize() {
         // full repaint is cheap there because the alt-screen owns the
         // whole grid and there's no host scrollback to preserve).
         const bool width_changed = (prev_w != size_.width.raw());
+        if (width_changed) replay_owed_ = true;
         fs_coherence_ = coherent::Divergent{};
         in_coherence_ = std::visit(
             [width_changed](auto&& arm) -> inline_frame::InlineCoherence {

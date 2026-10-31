@@ -400,7 +400,8 @@ public:
         TermRows term_h,
         const StylePool& pool,
         Writer& writer,
-        bool synchronized_output = true) &&;
+        bool synchronized_output = true,
+        std::string_view history = {}) &&;
 
     [[nodiscard]] InlineFrame<Sealed> finalize(std::string& out) && noexcept;
 };

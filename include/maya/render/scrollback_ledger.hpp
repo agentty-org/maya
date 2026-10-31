@@ -140,11 +140,12 @@ public:
     /// until the first paint records the real height; it never feeds
     /// debt. `separator` marks inter-block chrome (gap rows, dividers)
     /// that must never lead the prefix.
-    void seal(Element e, std::size_t est_rows, bool separator = false) {
+    void seal(Element e, std::size_t est_rows, bool separator = false,
+              std::uint64_t source = 0) {
         if (est_rows < 1) est_rows = 1;
         elements_.push_back(std::move(e));
         meta_.push_back(Meta{-1, static_cast<std::int64_t>(est_rows),
-                             separator});
+                             separator, source});
         est_total_ += est_rows;
     }
 
@@ -186,7 +187,8 @@ public:
     /// Defined in src/render/scrollback_ledger.cpp (needs the layout
     /// engine; keeping the header dependency-light).
     std::size_t seal_measured(Element e, std::size_t fallback_est_rows,
-                              bool separator = false);
+                              bool separator = false,
+                              std::uint64_t source = 0);
 
     /// Replace block k in place (rehydrate-time collapse of an
     /// off-screen giant body). Resets the recorded height — the next
@@ -335,6 +337,14 @@ public:
     /// width so the seal-time warm matches the next frame's layout.
     [[nodiscard]] int paint_width() const noexcept { return paint_width_; }
 
+    /// The host's tag for block k (seal's `source`), e.g. the index of the
+    /// message it was built from. Drops keep it in step with the blocks,
+    /// so a host can ask "where does my live prefix start?" without
+    /// tracking every trim itself. 0 for an out-of-range k.
+    [[nodiscard]] std::uint64_t source(std::size_t k) const noexcept {
+        return k < meta_.size() ? meta_[k].source : 0;
+    }
+
     /// The sealed elements, for rendering (Conversation::Config::ledger
     /// hands maya an ElementListRef over this vector, tagged with `this`
     /// so the paint pass can record heights back).
@@ -375,6 +385,7 @@ private:
         std::int64_t recorded = -1;   // paint-recorded rows; -1 = never painted
         std::int64_t estimate = 1;    // host policy estimate (seal-time)
         bool         separator = false;
+        std::uint64_t source  = 0;    // host tag (see source())
     };
 
     std::vector<Element>      elements_;

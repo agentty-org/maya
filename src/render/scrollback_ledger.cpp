@@ -33,7 +33,8 @@ namespace maya {
 
 std::size_t ScrollbackLedger::seal_measured(Element e,
                                             std::size_t fallback_est_rows,
-                                            bool separator) {
+                                            bool separator,
+                                            std::uint64_t source) {
     std::size_t rows = fallback_est_rows;
 
     if (paint_width_ > 0) {
@@ -73,7 +74,7 @@ std::size_t ScrollbackLedger::seal_measured(Element e,
         }
     }
 
-    seal(std::move(e), rows, separator);
+    seal(std::move(e), rows, separator, source);
     return rows < 1 ? 1 : rows;
 }
 
