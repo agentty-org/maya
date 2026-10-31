@@ -19,14 +19,18 @@
 //     parallel across cores;
 //   - results are cached per (block hash, width, theme); dragging back to a
 //     width already seen costs nothing but the write;
-//   - rendering stops at a row cap and a byte cap (newest blocks win), sized
-//     to what the terminal keeps anyway.
+//   - the host's history is pulled newest first, so nothing is built that
+//     a host-set limit would throw away.
 //
-// The device calls the source only on a width-change reset, never per frame.
+// No cap by default. Terminals don't report their scrollback size, so the
+// whole history is written and the terminal keeps what it keeps.
+//
+// The device calls the source only on a frame that wipes scrollback.
 
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -63,10 +67,12 @@ struct ScrollbackReplay {
     // exact columns the live rows did. Identity when unset.
     std::function<Element(Element)> wrap;
 
-    // Caps on what one replay writes. Rows past the terminal's own
-    // scrollback limit are wasted; the newest blocks are kept.
-    int         max_rows  = 10'000;
-    std::size_t max_bytes = 8u << 20;
+    // Optional limits on what one replay writes. Unlimited by default: the
+    // terminal keeps whatever its own scrollback setting allows, and no
+    // terminal reports that setting, so maya doesn't guess. The newest blocks
+    // are kept when a limit is set. max_rows == 0 turns replay off.
+    int         max_rows  = std::numeric_limits<int>::max();
+    std::size_t max_bytes = std::numeric_limits<std::size_t>::max();
 
     // Bumped by the host when the history CHANGES SHAPE in a way hashes
     // can't see (a theme swap is already handled; this is for host-side
@@ -95,6 +101,7 @@ struct Rendered {
     int         cached  = 0;   // of which served from cache
     bool        capped  = false;
     double      build_ms = 0;  // time in the host's blocks() call
+    double      render_ms = 0; // time laying out + serializing misses
 };
 
 // Render `src` at `width` with `theme`. Pure apart from the per-block cache;

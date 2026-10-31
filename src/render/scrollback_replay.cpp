@@ -132,7 +132,7 @@ void clear_cache() noexcept { cache().clear(); }
 
 Rendered render_history(const ScrollbackReplay& src, int width, const Theme& theme) {
     Rendered out;
-    if ((!src.blocks && !src.chunk) || width <= 0) return out;
+    if ((!src.blocks && !src.chunk) || width <= 0 || src.max_rows <= 0) return out;
     using clock = std::chrono::steady_clock;
     auto ms = [](clock::time_point t0) {
         return std::chrono::duration<double, std::milli>(clock::now() - t0).count();
@@ -196,9 +196,11 @@ Rendered render_history(const ScrollbackReplay& src, int width, const Theme& the
                 wrapped[j] = src.wrap ? src.wrap(win[miss[j]].element)
                                       : win[miss[j]].element;
             std::vector<Rows> got(miss.size());
+            const auto tr0 = clock::now();
             exec::parallel_for(miss.size(), [&](std::size_t j) {
                 got[j] = render_block(wrapped[j], width, theme);
             });
+            out.render_ms += ms(tr0);
             for (std::size_t j = 0; j < miss.size(); ++j) {
                 const std::size_t k = miss[j];
                 if (win[k].hash != 0)

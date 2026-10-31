@@ -733,9 +733,9 @@ auto Device::render_inline(const Element& root, int w) -> Status {
                         history.size(),
                         std::chrono::duration<double, std::milli>(
                             std::chrono::steady_clock::now() - t0).count()};
-                    io_log("scrollback replay: rows=%d blocks=%d cached=%d capped=%d bytes=%zu ms=%.1f build_ms=%.1f",
+                    io_log("scrollback replay: rows=%d blocks=%d cached=%d capped=%d bytes=%zu ms=%.1f build_ms=%.1f render_ms=%.1f",
                            got.rows, got.blocks, got.cached, got.capped ? 1 : 0,
-                           history.size(), last_replay_.ms, got.build_ms);
+                           history.size(), last_replay_.ms, got.build_ms, got.render_ms);
                 }
                 replay_owed_ = false;
                 return lift(std::move(arm).render(
