@@ -148,6 +148,8 @@ public:
     /// they are BUILT, so a tree built before this call has already made
     /// its requests; to keep them, build through present(build) instead.
     Presented present(const Element& root) {
+        if (auto due = rt_->scrollback_replay_due(); due && clock::now() >= *due)
+            rt_->fire_due_replay();
         Element framed = detail::apply_theme_canvas(root, rt_->theme(), rt_->size().width.value);
         (void)rt_->render(framed);
         send_probe();
@@ -174,6 +176,12 @@ public:
     /// re-request.
     template <std::invocable Build>
     Presented present_if(std::uint64_t visual_hash, Build&& build, bool force = false) {
+        // A debounced replay that came due forces this frame (it changes
+        // what's on the wire even though the model didn't move).
+        if (auto due = rt_->scrollback_replay_due(); due && clock::now() >= *due) {
+            rt_->fire_due_replay();
+            force = true;
+        }
         if (!force && last_hash_ && *last_hash_ == visual_hash && !pending_redraw_
             && !rt_->has_deferred_frame() && !rt_->has_pending_writes()) {
             Presented f; f.skipped = true; return f;
@@ -362,6 +370,9 @@ private:
                 : detail::kAnimationFrameInterval;
             f.redraw_at = clock::now() + delay;
         }
+        // A debounced scrollback replay is due later: wake then.
+        if (auto due = rt_->scrollback_replay_due())
+            if (!f.redraw_at || *due < *f.redraw_at) f.redraw_at = *due;
         if (detail::scroll_writeback_dirty) {
             detail::scroll_writeback_dirty = false;
             f.redraw_now = true;

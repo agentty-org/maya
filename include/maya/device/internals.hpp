@@ -614,6 +614,16 @@ public:
     // that was live during the resize just settled; its rows changed).
     // Promotes the next frame to a hard reset.
     void request_scrollback_replay() noexcept { reset_inline(); }
+    // When a debounced replay is due (the host wakes the loop then).
+    [[nodiscard]] std::optional<std::chrono::steady_clock::time_point>
+    scrollback_replay_due() const noexcept { return replay_due_; }
+    // Called by Screen when the deadline passed: promote the next frame to a
+    // hard reset that carries the history.
+    void fire_due_replay() noexcept {
+        if (!replay_due_ || std::chrono::steady_clock::now() < *replay_due_) return;
+        replay_due_.reset();
+        reset_inline();
+    }
     // What the last replay did, for host logging. rows == 0 until one ran.
     [[nodiscard]] const ReplayStats& last_scrollback_replay() const noexcept {
         return last_replay_;
@@ -766,6 +776,12 @@ private:
     ScrollbackReplay                replay_;
     bool                            replay_owed_ = false;
     ReplayStats                     last_replay_;
+    // Debounce: a width change paints the live frame at once (plain wipe)
+    // and replays history once the width has held still this long. Dragging
+    // a window edge sends a resize per column; one replay at the end, not
+    // one per column. reset_inline (a thread swap) replays immediately.
+    static constexpr std::chrono::milliseconds kReplayDebounce{75};
+    std::optional<std::chrono::steady_clock::time_point> replay_due_;
 
     // ── Grid render backend (RenderBackend::Grid) ─────────────────────────
     // A parallel output path for a cooperating host: emit the cell diff as a

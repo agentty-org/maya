@@ -50,7 +50,13 @@ void Device::handle_resize() {
         // full repaint is cheap there because the alt-screen owns the
         // whole grid and there's no host scrollback to preserve).
         const bool width_changed = (prev_w != size_.width.raw());
-        if (width_changed) replay_owed_ = true;
+        // The replay waits for the width to settle (kReplayDebounce); this
+        // frame is a plain wipe + live repaint. Each further change pushes
+        // the deadline out, so a drag replays once, at its final width.
+        if (width_changed && (replay_.blocks || replay_.chunk)) {
+            replay_owed_ = false;
+            replay_due_  = std::chrono::steady_clock::now() + kReplayDebounce;
+        }
         fs_coherence_ = coherent::Divergent{};
         in_coherence_ = std::visit(
             [width_changed](auto&& arm) -> inline_frame::InlineCoherence {
