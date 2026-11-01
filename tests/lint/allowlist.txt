@@ -40,6 +40,7 @@ layout/yoga.cpp: thread_local
 render/paint_box.cpp: thread_local
 render/paint_component.cpp: thread_local
 render/scrollback_ledger.cpp: thread_local
+render/scrollback_replay.cpp: thread_local
 terminal/tmux.cpp: thread_local mutex
 widget/markdown/parser/parser_inline.cpp: thread_local
 widget/markdown/streaming/markdown_memo.cpp: thread_local

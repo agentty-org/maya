@@ -913,6 +913,11 @@ set_tests_properties(
             add_test(NAME ${tgt} COMMAND ${tgt})
             set_tests_properties(${tgt} PROPERTIES TIMEOUT 120)
         endforeach()
+        # Not a test: times a cold/warm scrollback replay. Links the
+        # production (-O3) library so the numbers mean something.
+        add_executable(bench_scrollback_replay EXCLUDE_FROM_ALL
+            tests/bench_scrollback_replay.cpp)
+        target_link_libraries(bench_scrollback_replay PRIVATE maya)
         # forkpty() needs -lutil on Linux/glibc.
         if(NOT APPLE)
             target_link_libraries(test_terminal_restore PRIVATE util)

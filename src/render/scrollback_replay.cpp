@@ -37,22 +37,51 @@ struct Rows {
 // One block at `width`: lay out with auto height, paint, serialize. The
 // root states the full width, the same as the live frame's theme wrapper
 // (theme_canvas.hpp), so a themed background reaches the right edge.
+//
+// One paint per block. The canvas starts tall enough for most blocks and
+// grows to fit; a block only gets a second pass if it outgrew a canvas
+// that already held the tallest block seen on this thread so far. The
+// canvas and style pool are per worker thread and reused across blocks.
 Rows render_block(const Element& block, int width, const Theme& theme) {
     BoxElement box;
     box.layout.width = Dimension::fixed(width);
     box.children.push_back(block);
     const Element e{std::move(box)};
-    StylePool pool;
-    std::vector<layout::LayoutNode> nodes;
-    Canvas canvas{width, 64, &pool};
-    render_tree(e, canvas, pool, theme, nodes, /*auto_height=*/true);
-    int h = nodes.empty() ? 0 : nodes[0].computed.size.height.raw();
-    if (h > canvas.height()) {
-        canvas.resize(width, h);
-        canvas.clear();
-        render_tree(e, canvas, pool, theme, nodes, /*auto_height=*/true);
-        h = nodes[0].computed.size.height.raw();
+
+    struct Scratch {
+        StylePool                       pool;
+        std::vector<layout::LayoutNode> nodes;
+        Canvas                          canvas{1, 1, nullptr};
+        int                             tallest = 256;
+        int                             dirty   = 0;   // rows the last block painted
+    };
+    thread_local Scratch s;
+    // A fresh pool per block: serialize() emits styles by pool id, and a
+    // block's bytes must not depend on which blocks rendered before it on
+    // this thread (the bytes are cached and reused at any position).
+    s.pool.clear();
+    s.canvas.set_style_pool(&s.pool);
+    if (s.canvas.width() != width || s.canvas.height() < s.tallest) {
+        s.canvas.resize(width, s.tallest);
+    } else {
+        // Only the rows the previous block touched hold anything; clearing
+        // the whole (tall) canvas per block was most of the cost.
+        s.canvas.reset_clips();
+        s.canvas.clear_rows(s.dirty + 1);
     }
+
+    render_tree(e, s.canvas, s.pool, theme, s.nodes, /*auto_height=*/true);
+    int h = s.nodes.empty() ? 0 : s.nodes[0].computed.size.height.raw();
+    if (h > s.canvas.height()) {
+        // Taller than anything before: grow (with room) and paint again.
+        s.tallest = h + h / 2;
+        s.canvas.resize(width, s.tallest);
+        render_tree(e, s.canvas, s.pool, theme, s.nodes, /*auto_height=*/true);
+        h = s.nodes[0].computed.size.height.raw();
+    }
+    // Paint stays inside the laid-out height (the root box clips to it), so
+    // [0, h) is everything this block can have written.
+    s.dirty = std::min(s.canvas.height(), std::max(h, s.canvas.max_content_row() + 1));
     if (h <= 0) return {};
 
     // serialize() is the same row writer the live frame uses, so replayed
@@ -62,7 +91,7 @@ Rows render_block(const Element& block, int width, const Theme& theme) {
     Rows out;
     out.rows = h;
     out.bytes.reserve(static_cast<std::size_t>(h) * static_cast<std::size_t>(width + 16));
-    serialize(canvas, pool, out.bytes, h, 0);
+    serialize(s.canvas, s.pool, out.bytes, h, 0);
     return out;
 }
 
@@ -120,8 +149,8 @@ Cache& cache() {
 }
 
 std::uint64_t theme_key(const Theme& t) noexcept {
-    // The address is stable for a given theme value only while it lives,
-    // so key on the epoch the runtime bumps on every swap instead.
+    // The live theme is assigned through one slot, so its address never
+    // changes; the epoch the runtime bumps on every swap is the identity.
     (void)t;
     return theme::live_epoch();
 }
