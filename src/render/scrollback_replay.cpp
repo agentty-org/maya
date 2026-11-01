@@ -42,10 +42,14 @@ struct Rows {
 // grows to fit; a block only gets a second pass if it outgrew a canvas
 // that already held the tallest block seen on this thread so far. The
 // canvas and style pool are per worker thread and reused across blocks.
-Rows render_block(const Element& block, int width, const Theme& theme) {
+// `content` is the block, already wrapped in host chrome, built over an
+// ElementListRef into the block's shared storage: no tree is copied. A
+// block is a whole Turn tree, and deep-copying it per render was the
+// largest single cost of a replay.
+Rows render_block(const Element& content, int width, const Theme& theme) {
     BoxElement box;
     box.layout.width = Dimension::fixed(width);
-    box.children.push_back(block);
+    box.children.push_back(content);   // a ref + chrome: shallow
     const Element e{std::move(box)};
 
     struct Scratch {
@@ -218,12 +222,17 @@ Rendered render_history(const ScrollbackReplay& src, int width, const Theme& the
         }
         if (!miss.empty()) {
             // Wrap on this thread (host chrome may read host state), then
-            // lay out + serialize in parallel. Workers only read the
-            // wrapped Elements and write their own slot.
+            // lay out + serialize in parallel. Nothing is deep-copied: each
+            // block's shared tree is borrowed through an ElementListRef, and
+            // the wrapper only adds chrome around that reference. Workers
+            // read these and write their own slot.
             std::vector<Element> wrapped(miss.size());
-            for (std::size_t j = 0; j < miss.size(); ++j)
-                wrapped[j] = src.wrap ? src.wrap(win[miss[j]].element)
-                                      : win[miss[j]].element;
+            for (std::size_t j = 0; j < miss.size(); ++j) {
+                const auto& sp = win[miss[j]].element;
+                if (!sp) continue;
+                Element ref{ElementListRef{sp.get()}};
+                wrapped[j] = src.wrap ? src.wrap(std::move(ref)) : std::move(ref);
+            }
             std::vector<Rows> got(miss.size());
             const auto tr0 = clock::now();
             exec::parallel_for(miss.size(), [&](std::size_t j) {

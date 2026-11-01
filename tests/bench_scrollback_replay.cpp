@@ -30,7 +30,7 @@ static std::vector<ReplayBlock> make_blocks(int n) {
         using namespace dsl;
         Element e = v(text("  \xe2\x9c\xa6 model                                  turn " + std::to_string(i)),
                       markdown(md)).build();
-        out.push_back({static_cast<std::uint64_t>(0x9000 + i), std::move(e)});
+        out.push_back(make_replay_block(static_cast<std::uint64_t>(0x9000 + i), std::move(e)));
     }
     return out;
 }

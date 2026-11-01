@@ -153,8 +153,8 @@ ScrollbackReplay history(int n) {
             std::string longline = "BODY-" + std::to_string(i) + ":";
             for (int w = 0; w < 30; ++w) longline += " word" + std::to_string(w);
             longline += " END-" + std::to_string(i);
-            v.push_back({0x1000u + static_cast<std::uint64_t>(i),
-                         v_stack(text("BLOCK-" + std::to_string(i)), text(longline))});
+            v.push_back(make_replay_block(0x1000u + static_cast<std::uint64_t>(i),
+                         v_stack(text("BLOCK-" + std::to_string(i)), text(longline))));
         }
         return v;
     };

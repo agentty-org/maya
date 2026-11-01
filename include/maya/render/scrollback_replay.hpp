@@ -31,6 +31,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -44,8 +45,19 @@ struct ReplayBlock {
     // Stable identity of this block's content. Same hash, same bytes at a
     // given width and theme; 0 means "don't cache".
     std::uint64_t hash = 0;
-    Element       element;
+    // Shared and immutable: a host can cache built blocks and hand the same
+    // tree to every replay without deep-copying it (an Element is a value
+    // tree; copying a Turn costs more than painting it). Held as a
+    // one-element list so the renderer can reference it in place
+    // (ElementListRef needs a vector). Use make_replay_block().
+    std::shared_ptr<const std::vector<Element>> element;
 };
+
+[[nodiscard]] inline ReplayBlock make_replay_block(std::uint64_t hash, Element e) {
+    auto v = std::make_shared<std::vector<Element>>();
+    v->push_back(std::move(e));
+    return ReplayBlock{hash, std::move(v)};
+}
 
 struct ScrollbackReplay {
     // History above the live canvas, OLDEST first. Called once per replay,
@@ -64,7 +76,9 @@ struct ScrollbackReplay {
 
     // Wraps one history block in the same chrome the live canvas puts around
     // its frozen prefix (outer padding etc), so replayed rows sit at the
-    // exact columns the live rows did. Identity when unset.
+    // exact columns the live rows did. Identity when unset. Receives the
+    // block as a reference element (ElementListRef), so wrapping copies
+    // nothing but the chrome.
     std::function<Element(Element)> wrap;
 
     // Optional limits on what one replay writes. Unlimited by default: the
