@@ -4,6 +4,18 @@
 namespace maya {
 namespace render_detail {
 
+namespace {
+// Display width of a styled-run chunk. Runs are short (a word or a few), so
+// the general string_width's SIMD setup costs more than it saves; a plain
+// byte loop answers the all-printable-ASCII case (the norm) and anything
+// else defers to string_width, so the two can never disagree.
+[[nodiscard]] inline int chunk_width(std::string_view s) noexcept {
+    for (unsigned char b : s)
+        if (b >= 0x80 || b < 0x20 || b == 0x7F) return string_width(s);
+    return static_cast<int>(s.size());
+}
+}  // namespace
+
 void paint_text(const PaintCtx& c, const TextElement& node) {
     Canvas& canvas = c.canvas;
     StylePool& pool = c.pool;
@@ -35,7 +47,7 @@ void paint_text(const PaintCtx& c, const TextElement& node) {
         int row = 0;
         for (const auto& line : lines) {
             if (row >= ah) break;
-            canvas.write_text(ax, ay + row, line.text, style_id);
+            canvas.write_text(ax, ay + row, line.view(node.content), style_id);
             ++row;
         }
         return;
@@ -51,7 +63,7 @@ void paint_text(const PaintCtx& c, const TextElement& node) {
                             node.wrap == TextWrap::TruncateStart ||
                             node.wrap == TextWrap::TruncateMiddle);
     if (truncates && lines.size() == 1) {
-        const auto& line = lines[0].text;
+        const std::string_view line = lines[0].view(node.content);
         const int y = ay;
         constexpr std::string_view kEll = "\xe2\x80\xa6";
 
@@ -67,7 +79,7 @@ void paint_text(const PaintCtx& c, const TextElement& node) {
 
         // Paint line bytes [ls..le) with runs, where ls maps to
         // content byte cs. Returns x after the painted segment.
-        auto paint_seg = [&](const std::string& ln,
+        auto paint_seg = [&](std::string_view ln,
                              std::size_t ls, std::size_t le,
                              std::size_t cs,
                              int x0, int yy) -> int {
@@ -170,7 +182,7 @@ void paint_text(const PaintCtx& c, const TextElement& node) {
             if (row >= ah) break;
             int y = ay + row;
             ++row;
-            const std::string& line_text = line.text;
+            const std::string_view line_text = line.view(node.content);
             const std::size_t content_byte = line.byte_offset;
 
             int x_cursor = ax;
@@ -194,11 +206,11 @@ void paint_text(const PaintCtx& c, const TextElement& node) {
                 }
                 if (chunk_end <= line_byte) chunk_end = line_byte + 1;
 
-                auto chunk = std::string_view(line_text)
+                auto chunk = line_text
                                  .substr(line_byte, chunk_end - line_byte);
                 uint16_t sid = intern_bg(run.style);
                 canvas.write_text(x_cursor, y, chunk, sid);
-                x_cursor += string_width(chunk);
+                x_cursor += chunk_width(chunk);
                 line_byte = chunk_end;
             }
         }

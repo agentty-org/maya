@@ -135,8 +135,20 @@ struct StyledRun {
 /// present in `content`, so `byte_offset` is left as 0 and the painter
 /// uses a separate explicit-mapping branch for those modes.
 struct WrappedLine {
-    std::string text;
+    /// The line's bytes. For Wrap / NoWrap these are `len` bytes of the
+    /// element's own `content` starting at `byte_offset` (no copy: wrapping
+    /// a paragraph used to allocate a string per line). For truncation
+    /// modes the line is synthetic and lives in `owned`.
     std::size_t byte_offset = 0;
+    std::size_t len         = 0;
+    std::string owned;      // synthetic lines only
+    bool        synthetic   = false;
+
+    /// The bytes, resolved against the element that produced this line.
+    /// Offsets (not pointers) so a copied TextElement's cache stays valid.
+    [[nodiscard]] std::string_view view(std::string_view content) const noexcept {
+        return synthetic ? std::string_view{owned} : content.substr(byte_offset, len);
+    }
 };
 
 struct TextElement {

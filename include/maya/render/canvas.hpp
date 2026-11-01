@@ -413,6 +413,22 @@ private:
     };
     std::vector<Look>        looks_;
     static Look look_of(const Style& s) noexcept;
+
+    // Transition cache: the differential SGR for a (prev, new) style pair.
+    // Rows alternate between a handful of styles (body, bold, code, link),
+    // so the same pairs repeat thousands of times per frame; computing the
+    // diff resolves both styles against the theme every time. Direct-mapped
+    // by a hash of the pair, cleared with the pool and on retheme (the
+    // bytes bake the theme in). A pool is used by one thread at a time.
+    struct TransitionEntry {
+        std::uint32_t key = 0xFFFFFFFFu;   // (prev << 16) | new; ~0 = empty
+        std::uint8_t  len = 0;
+        char          bytes[47];
+    };
+    static constexpr std::size_t kTransitionSlots = 256;
+    mutable std::vector<TransitionEntry> transitions_;
+    void write_transition_sgr_uncached(uint16_t prev_id, uint16_t new_id,
+                                       std::string& out) const;
     // The theme the cached SGR strings were built under, held BY VALUE and
     // compared BY VALUE.
     //

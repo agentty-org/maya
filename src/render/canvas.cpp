@@ -234,6 +234,7 @@ bool StylePool::retheme() {
         sgr_cache_[i] = build_sgr(styles_[i]);
         looks_[i]     = look_of(styles_[i]);
     }
+    transitions_.clear();   // the cached diffs baked the old theme in
     // Bump pool_id_ so thread_local intern_const slots re-resolve.
     //
     // intern_const caches a style id per call site, keyed on pool_id_, and
@@ -256,6 +257,7 @@ void StylePool::clear() {
     sgr_cache_.resize(1);
     looks_.resize(1);
     caret_ids_.clear();
+    transitions_.clear();
     size_ = 1;
     overflow_ = false;
     std::fill(slots_.begin(), slots_.end(), Slot{});
@@ -389,6 +391,29 @@ void StylePool::write_transition_sgr(uint16_t prev_id, uint16_t new_id,
         return;
     }
 
+    // The differential SGR depends only on the two styles, the theme and
+    // the colour level. The level is fixed for the process; the theme is
+    // covered by retheme()/clear() dropping the cache. So it is a pure
+    // function of (prev, new) for the pool's lifetime: compute once.
+    if (transitions_.empty()) transitions_.resize(kTransitionSlots);
+    const std::uint32_t key = (static_cast<std::uint32_t>(prev_id) << 16) | new_id;
+    auto& slot = transitions_[(key * 0x9E3779B1u) >> 24];   // top 8 bits: 256 slots
+    if (slot.key == key) {
+        out.append(slot.bytes, slot.len);
+        return;
+    }
+    const std::size_t before = out.size();
+    write_transition_sgr_uncached(prev_id, new_id, out);
+    const std::size_t n_bytes = out.size() - before;
+    if (n_bytes <= sizeof(slot.bytes)) {
+        slot.key = key;
+        slot.len = static_cast<std::uint8_t>(n_bytes);
+        std::memcpy(slot.bytes, out.data() + before, n_bytes);
+    }
+}
+
+void StylePool::write_transition_sgr_uncached(uint16_t prev_id, uint16_t new_id,
+                                              std::string& out) const {
     const Style& from = styles_[prev_id];
     const Style& to   = styles_[new_id];
 

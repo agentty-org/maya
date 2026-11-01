@@ -105,6 +105,25 @@ inline void emit_cell_run(const Canvas& canvas, const StylePool& pool,
         if (out_ch < 0x80) [[likely]] {
             ascii_buf[ascii_len++] = static_cast<char>(out_ch);
             if (ascii_len == 256) [[unlikely]] flush_ascii();
+            // Run fast path: the cells that follow are almost always more
+            // single-width ASCII in this same style (a word, a sentence).
+            // Compare the upper 32 bits (style + width + flags) against this
+            // cell's in one test and copy the low byte; anything else drops
+            // back to the general loop above. Output is byte-identical.
+            if (!current_conceal) {
+                const uint64_t hi = packed & 0xFFFFFFFF00000000ull;
+                int nx = x + 1;
+                while (nx < x_end) {
+                    const uint64_t p2 = cells[row_base + nx];
+                    if ((p2 & 0xFFFFFFFF00000000ull) != hi) break;
+                    const auto c2 = static_cast<uint32_t>(p2);
+                    if (c2 >= 0x80) break;
+                    ascii_buf[ascii_len++] = static_cast<char>(c2);
+                    if (ascii_len == 256) [[unlikely]] flush_ascii();
+                    ++nx;
+                }
+                x = nx - 1;
+            }
         } else {
             flush_ascii();
             detail::encode_utf8(out_ch, out);
