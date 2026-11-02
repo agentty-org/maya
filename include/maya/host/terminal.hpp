@@ -248,6 +248,8 @@ public:
                     };
                 if constexpr (requires { P::scrollback_wrap(std::declval<Element>()); })
                     src.wrap = [](Element e) { return P::scrollback_wrap(std::move(e)); };
+                if constexpr (requires { P::scrollback_after(); })
+                    src.after = [] { P::scrollback_after(); };
                 if constexpr (requires { P::scrollback_limits(k.model()); }) {
                     const auto lim = P::scrollback_limits(k.model());
                     src.max_rows  = lim.first;

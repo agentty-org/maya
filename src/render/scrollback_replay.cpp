@@ -16,6 +16,8 @@
 #include <atomic>
 #include <chrono>
 #include <list>
+#include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <utility>
 
@@ -24,6 +26,7 @@
 #include "maya/render/renderer.hpp"
 #include "maya/render/serialize.hpp"
 #include "maya/style/theme.hpp"
+#include "render_internal.hpp"
 
 namespace maya::replay {
 
@@ -34,35 +37,54 @@ struct Rows {
     int         rows = 0;
 };
 
+// Per-worker scratch (canvas, layout nodes, style pool). Lives for one
+// replay: blocks borrow one from this list and hand it back, and the list is
+// freed when the replay ends. Kept per thread before, so a worker that once
+// painted a 1000-row block held that canvas for the rest of the session.
+struct Scratch {
+    StylePool                       pool;
+    std::vector<layout::LayoutNode> nodes;
+    Canvas                          canvas{1, 1, nullptr};
+    int                             tallest = 256;
+    int                             dirty   = 0;   // rows the last block painted
+};
+struct ScratchList {
+    std::mutex                            mu;
+    std::vector<std::unique_ptr<Scratch>> free;
+    std::unique_ptr<Scratch> take() {
+        std::lock_guard lk(mu);
+        if (free.empty()) return std::make_unique<Scratch>();
+        auto s = std::move(free.back());
+        free.pop_back();
+        return s;
+    }
+    void give(std::unique_ptr<Scratch> s) {
+        std::lock_guard lk(mu);
+        free.push_back(std::move(s));
+    }
+};
+
 // One block at `width`: lay out with auto height, paint, serialize. The
 // root states the full width, the same as the live frame's theme wrapper
 // (theme_canvas.hpp), so a themed background reaches the right edge.
 //
 // One paint per block. The canvas starts tall enough for most blocks and
 // grows to fit; a block only gets a second pass if it outgrew a canvas
-// that already held the tallest block seen on this thread so far. The
-// canvas and style pool are per worker thread and reused across blocks.
+// that already held the tallest block this scratch has seen. Scratch is
+// borrowed from the replay's list, so it's reused across blocks.
 // `content` is the block, already wrapped in host chrome, built over an
 // ElementListRef into the block's shared storage: no tree is copied. A
 // block is a whole Turn tree, and deep-copying it per render was the
 // largest single cost of a replay.
-Rows render_block(const Element& content, int width, const Theme& theme) {
+Rows render_block(const Element& content, int width, const Theme& theme, Scratch& s) {
     BoxElement box;
     box.layout.width = Dimension::fixed(width);
     box.children.push_back(content);   // a ref + chrome: shallow
     const Element e{std::move(box)};
 
-    struct Scratch {
-        StylePool                       pool;
-        std::vector<layout::LayoutNode> nodes;
-        Canvas                          canvas{1, 1, nullptr};
-        int                             tallest = 256;
-        int                             dirty   = 0;   // rows the last block painted
-    };
-    thread_local Scratch s;
     // A fresh pool per block: serialize() emits styles by pool id, and a
     // block's bytes must not depend on which blocks rendered before it on
-    // this thread (the bytes are cached and reused at any position).
+    // this scratch (the bytes are cached and reused at any position).
     s.pool.clear();
     s.canvas.set_style_pool(&s.pool);
     if (s.canvas.width() != width || s.canvas.height() < s.tallest) {
@@ -83,6 +105,12 @@ Rows render_block(const Element& content, int width, const Theme& theme) {
         render_tree(e, s.canvas, s.pool, theme, s.nodes, /*auto_height=*/true);
         h = s.nodes[0].computed.size.height.raw();
     }
+    // render_tree cached every component's cells in this thread's component
+    // cache. Their style ids belong to s.pool, which the next block clears,
+    // so they can never be reused, and across a long history they add up to
+    // hundreds of MB. Drop them. render_history() swaps the caller's own
+    // (live frame) cache out first, so this never touches it.
+    render_detail::clear_component_cache();
     // Paint stays inside the laid-out height (the root box clips to it), so
     // [0, h) is everything this block can have written.
     s.dirty = std::min(s.canvas.height(), std::max(h, s.canvas.max_content_row() + 1));
@@ -96,6 +124,8 @@ Rows render_block(const Element& content, int width, const Theme& theme) {
     out.rows = h;
     out.bytes.reserve(static_cast<std::size_t>(h) * static_cast<std::size_t>(width + 16));
     serialize(s.canvas, s.pool, out.bytes, h, 0);
+    // The reserve is a guess; the rows are cached, so don't keep the slack.
+    out.bytes.shrink_to_fit();
     return out;
 }
 
@@ -139,6 +169,7 @@ public:
         }
     }
     void clear() noexcept { map_.clear(); lru_.clear(); bytes_ = 0; }
+    std::size_t bytes() const noexcept { return bytes_; }
 
 private:
     using Entry = std::pair<Key, Rows>;
@@ -162,10 +193,20 @@ std::uint64_t theme_key(const Theme& t) noexcept {
 }  // namespace
 
 void clear_cache() noexcept { cache().clear(); }
+std::size_t cache_bytes() noexcept { return cache().bytes(); }
 
 Rendered render_history(const ScrollbackReplay& src, int width, const Theme& theme) {
     Rendered out;
     if ((!src.blocks && !src.chunk) || width <= 0 || src.max_rows <= 0) return out;
+    // Blocks may render inline on this thread, which also owns the live
+    // frame's component cache. render_block clears the cache per block, so
+    // park the live one and put it back when the replay is done.
+    struct KeepLiveCache {
+        render_detail::ComponentCache saved = std::move(render_detail::component_cache());
+        ~KeepLiveCache() { render_detail::component_cache() = std::move(saved); }
+    } keep_live;
+    // Canvases and layout buffers for this replay only (see Scratch).
+    ScratchList scratch;
     using clock = std::chrono::steady_clock;
     auto ms = [](clock::time_point t0) {
         return std::chrono::duration<double, std::milli>(clock::now() - t0).count();
@@ -236,7 +277,9 @@ Rendered render_history(const ScrollbackReplay& src, int width, const Theme& the
             std::vector<Rows> got(miss.size());
             const auto tr0 = clock::now();
             exec::parallel_for(miss.size(), [&](std::size_t j) {
-                got[j] = render_block(wrapped[j], width, theme);
+                auto s = scratch.take();
+                got[j] = render_block(wrapped[j], width, theme, *s);
+                scratch.give(std::move(s));
             });
             out.render_ms += ms(tr0);
             for (std::size_t j = 0; j < miss.size(); ++j) {

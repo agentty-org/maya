@@ -81,6 +81,10 @@ struct ScrollbackReplay {
     // nothing but the chrome.
     std::function<Element(Element)> wrap;
 
+    // Called once after each replay has rendered (and freed its scratch). A
+    // host with its own allocator uses it to hand the freed pages back.
+    std::function<void()> after;
+
     // Optional limits on what one replay writes. Unlimited by default: the
     // terminal keeps whatever its own scrollback setting allows, and no
     // terminal reports that setting, so maya doesn't guess. The newest blocks
@@ -126,6 +130,8 @@ struct Rendered {
 
 // Drop every cached rendering (a theme swap, tests).
 void clear_cache() noexcept;
+// Bytes of rendered rows the cache holds (diagnostics).
+[[nodiscard]] std::size_t cache_bytes() noexcept;
 
 }  // namespace replay
 }  // namespace maya

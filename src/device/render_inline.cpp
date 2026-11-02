@@ -728,6 +728,7 @@ auto Device::render_inline(const Element& root, int w) -> Status {
                     const auto t0 = std::chrono::steady_clock::now();
                     auto got = replay::render_history(replay_, canvas_.width(), theme_);
                     history = std::move(got.bytes);
+                    if (replay_.after) replay_.after();
                     last_replay_ = ReplayStats{
                         got.rows, got.blocks, got.cached, got.capped,
                         history.size(),
