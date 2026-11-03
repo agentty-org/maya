@@ -215,6 +215,7 @@ set(MAYA_LIB_SOURCES
     src/element/text.cpp
     src/terminal/ansi.cpp
     src/terminal/tmux.cpp
+    src/terminal/scrollback.cpp
     src/terminal/input.cpp
     src/terminal/writer.cpp
     src/layout/yoga.cpp
@@ -918,6 +919,11 @@ set_tests_properties(
         add_executable(bench_scrollback_replay EXCLUDE_FROM_ALL
             tests/bench_scrollback_replay.cpp)
         target_link_libraries(bench_scrollback_replay PRIVATE maya)
+        # Pure detection over fake env/config: runs everywhere.
+        add_executable(test_terminal_scrollback tests/test_terminal_scrollback.cpp)
+        target_link_libraries(test_terminal_scrollback PRIVATE ${MAYA_TEST_LIB})
+        add_test(NAME test_terminal_scrollback COMMAND test_terminal_scrollback)
+        set_tests_properties(test_terminal_scrollback PROPERTIES TIMEOUT 60)
         # forkpty() needs -lutil on Linux/glibc.
         if(NOT APPLE)
             target_link_libraries(test_terminal_restore PRIVATE util)

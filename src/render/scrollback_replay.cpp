@@ -16,8 +16,6 @@
 #include <atomic>
 #include <chrono>
 #include <list>
-#include <memory>
-#include <mutex>
 #include <unordered_map>
 #include <utility>
 
@@ -38,30 +36,14 @@ struct Rows {
 };
 
 // Per-worker scratch (canvas, layout nodes, style pool). Lives for one
-// replay: blocks borrow one from this list and hand it back, and the list is
-// freed when the replay ends. Kept per thread before, so a worker that once
-// painted a 1000-row block held that canvas for the rest of the session.
+// replay and is freed when it ends. It used to be thread_local, so a worker
+// that once painted a 1000-row block held that canvas for the session.
 struct Scratch {
     StylePool                       pool;
     std::vector<layout::LayoutNode> nodes;
     Canvas                          canvas{1, 1, nullptr};
     int                             tallest = 256;
     int                             dirty   = 0;   // rows the last block painted
-};
-struct ScratchList {
-    std::mutex                            mu;
-    std::vector<std::unique_ptr<Scratch>> free;
-    std::unique_ptr<Scratch> take() {
-        std::lock_guard lk(mu);
-        if (free.empty()) return std::make_unique<Scratch>();
-        auto s = std::move(free.back());
-        free.pop_back();
-        return s;
-    }
-    void give(std::unique_ptr<Scratch> s) {
-        std::lock_guard lk(mu);
-        free.push_back(std::move(s));
-    }
 };
 
 // One block at `width`: lay out with auto height, paint, serialize. The
@@ -209,7 +191,7 @@ Rendered render_history(const ScrollbackReplay& src, int width, const Theme& the
         ~KeepLiveCache() { render_detail::component_cache() = std::move(saved); }
     } keep_live;
     // Canvases and layout buffers for this replay only (see Scratch).
-    ScratchList scratch;
+    std::vector<Scratch> scratch;
     using clock = std::chrono::steady_clock;
     auto ms = [](clock::time_point t0) {
         return std::chrono::duration<double, std::milli>(clock::now() - t0).count();
@@ -279,10 +261,16 @@ Rendered render_history(const ScrollbackReplay& src, int width, const Theme& the
             }
             std::vector<Rows> got(miss.size());
             const auto tr0 = clock::now();
-            exec::parallel_for(miss.size(), [&](std::size_t j) {
-                auto s = scratch.take();
-                got[j] = render_block(wrapped[j], width, theme, *s);
-                scratch.give(std::move(s));
+            // One contiguous slice per scratch, so each slice reuses its own
+            // canvas and nothing is shared between workers.
+            constexpr std::size_t kSlices = 32;
+            const std::size_t slices = std::min(kSlices, miss.size());
+            if (scratch.size() < slices) scratch.resize(slices);
+            exec::parallel_for(slices, [&](std::size_t s) {
+                const std::size_t lo = miss.size() * s / slices;
+                const std::size_t hi = miss.size() * (s + 1) / slices;
+                for (std::size_t j = lo; j < hi; ++j)
+                    got[j] = render_block(wrapped[j], width, theme, scratch[s]);
             });
             out.render_ms += ms(tr0);
             for (std::size_t j = 0; j < miss.size(); ++j) {
