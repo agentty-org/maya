@@ -251,9 +251,7 @@ public:
                 if constexpr (requires { P::scrollback_after(); })
                     src.after = [] { P::scrollback_after(); };
                 if constexpr (requires { P::scrollback_limits(k.model()); }) {
-                    const auto lim = P::scrollback_limits(k.model());
-                    src.max_rows  = lim.first;
-                    src.max_bytes = lim.second;
+                    src.limits = [&k] { return P::scrollback_limits(k.model()); };
                 }
                 term_.set_scrollback_replay(std::move(src));
             }

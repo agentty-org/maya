@@ -197,7 +197,10 @@ std::size_t cache_bytes() noexcept { return cache().bytes(); }
 
 Rendered render_history(const ScrollbackReplay& src, int width, const Theme& theme) {
     Rendered out;
-    if ((!src.blocks && !src.chunk) || width <= 0 || src.max_rows <= 0) return out;
+    // The host's live limits win over the static fields.
+    const auto [max_rows, max_bytes] =
+        src.limits ? src.limits() : std::pair{src.max_rows, src.max_bytes};
+    if ((!src.blocks && !src.chunk) || width <= 0 || max_rows <= 0) return out;
     // Blocks may render inline on this thread, which also owns the live
     // frame's component cache. render_block clears the cache per block, so
     // park the live one and put it back when the replay is done.
@@ -294,7 +297,7 @@ Rendered render_history(const ScrollbackReplay& src, int width, const Theme& the
             const long long   r = rendered[k].rows;
             const std::size_t b = rendered[k].bytes.size() + 2;
             // Always keep the newest block, even if it alone is over.
-            if (!kept.empty() && (rows + r > src.max_rows || bytes + b > src.max_bytes)) {
+            if (!kept.empty() && (rows + r > max_rows || bytes + b > max_bytes)) {
                 full = true;
                 out.capped = true;
                 break;

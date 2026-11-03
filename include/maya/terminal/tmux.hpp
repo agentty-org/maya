@@ -107,6 +107,10 @@ enum class Feature {
 // send OUT; this governs whether an answer comes BACK.
 [[nodiscard]] bool clipboard_reads_relayed() noexcept;
 
+// Rows of scrollback tmux keeps per pane (history-limit), or 0 when unknown
+// / not in tmux. Read from the same cached probe, no extra round-trip.
+[[nodiscard]] int history_limit() noexcept;
+
 // Wrap `seq` for tmux passthrough: `\ePtmux;` + seq with every ESC
 // DOUBLED + `\e\\`. Returns `seq` UNCHANGED when tmux is not in the
 // path, so call sites stay branch-free.

@@ -91,6 +91,9 @@ struct ScrollbackReplay {
     // are kept when a limit is set. max_rows == 0 turns replay off.
     int         max_rows  = std::numeric_limits<int>::max();
     std::size_t max_bytes = std::numeric_limits<std::size_t>::max();
+    // Optional: asked right before each replay, so a host setting that
+    // changes the limits applies to the next replay. Overrides the two above.
+    std::function<std::pair<int, std::size_t>()> limits;
 
     // Bumped by the host when the history CHANGES SHAPE in a way hashes
     // can't see (a theme swap is already handled; this is for host-side

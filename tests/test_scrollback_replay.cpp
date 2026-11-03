@@ -300,9 +300,26 @@ void test_no_source_is_plain_wipe() {
 
 }  // namespace
 
+void test_limits_read_each_replay() {
+    std::println("--- limits() is asked on every replay ---");
+    replay::clear_cache();
+    auto src = history(200);
+    int cap = 60;
+    src.limits = [&cap] { return std::pair<int, std::size_t>{cap, SIZE_MAX}; };
+    auto a = replay::render_history(src, 80, theme::native);
+    expect(a.capped && a.rows <= 60, "first replay uses the first cap");
+    cap = 20;   // the user changed the setting between two replays
+    auto b = replay::render_history(src, 80, theme::native);
+    expect(b.rows <= 20 && b.rows < a.rows, "second replay uses the new cap");
+    cap = 0;
+    auto c = replay::render_history(src, 80, theme::native);
+    expect(c.rows == 0 && c.bytes.empty(), "0 turns replay off");
+}
+
 int main() {
     test_replay_restores_everything();
     test_cap_keeps_newest();
+    test_limits_read_each_replay();
     test_cache_hits_and_same_bytes();
     test_no_source_is_plain_wipe();
     if (failures) {

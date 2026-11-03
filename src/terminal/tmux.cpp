@@ -7,6 +7,7 @@
 #include <array>
 #include <cerrno>
 #include <cstdio>
+#include <algorithm>
 #include <cstdlib>
 #include <mutex>
 #include <string>
@@ -35,6 +36,8 @@ struct Probe {
     // survives fixing the config, because the process never looks again.
     // tty+termname is the cheap identity: one display-message round-trip.
     std::string client_id;
+    // history-limit: rows of scrollback tmux keeps per pane. 0 = unknown.
+    int         history_limit = 0;
 };
 
 std::string env_str(const char* k) {
@@ -114,6 +117,7 @@ Probe& probe_locked() {
                 // leaves client_id empty and every refresh reads as a
                 // change, re-probing on every call.
                 p.client_id   = env_str("MAYA_TMUX_CLIENT");
+                p.history_limit = std::atoi(env_str("MAYA_TMUX_HISTORY_LIMIT").c_str());
                 return p;
             }
             // Only meaningful when a server is actually reachable: the
@@ -136,7 +140,13 @@ Probe& probe_locked() {
             // Identity of the client these answers describe. Cheap enough to
             // re-ask later (one round-trip) to decide whether the cached
             // verdict is still about the terminal the user is looking at.
-            p.client_id = ask_tmux("#{client_tty}/#{client_termname}");
+            // history_limit rides the same round-trip.
+            const std::string id_hl =
+                ask_tmux("#{client_tty}/#{client_termname} #{history_limit}");
+            const auto sp = id_hl.rfind(' ');
+            p.client_id = sp == std::string::npos ? id_hl : id_hl.substr(0, sp);
+            if (sp != std::string::npos)
+                p.history_limit = std::max(0, std::atoi(id_hl.c_str() + sp + 1));
         }
     }
     return p;
@@ -233,6 +243,10 @@ bool passthrough_allowed() noexcept {
 
 bool clipboard_reads_relayed() noexcept {
     return active() && probe().clip_relay;
+}
+
+int history_limit() noexcept {
+    return active() ? probe().history_limit : 0;
 }
 
 bool has_feature(Feature f) noexcept {
