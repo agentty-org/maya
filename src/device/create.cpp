@@ -201,11 +201,22 @@ auto Device::create(Options cfg) -> Result<Device> {
     // NOT route it through the parser). Bounded + best-effort: if the
     // terminal never answers, inline_top_row_ stays 0 → no offset → behavior
     // is identical to before. Only runs for inline + mouse.
-    if (cfg.mouse && rt.inline_terminal_) {
-        (void)platform::io_write_all(output_h, "\x1b[6n");
-        std::string resp;
-        // Extract a complete `ESC [ rows ; cols R` from `buf`, returning rows
-        // and erasing the matched bytes; 0 if none complete yet.
+    // Both startup queries go out in ONE write and are answered in one
+    // round-trip: the cursor position (inline + mouse) and, outside tmux,
+    // the OSC 5522 probe with its DA1 fence. Replies come back in order, so
+    // when the DA1 lands everything asked has arrived. Over ssh each round
+    // trip is a network RTT, so two in a row doubled the wait for the first
+    // frame.
+    const bool want_cpr  = cfg.mouse && rt.inline_terminal_;
+    const bool want_5522 = !ansi::tmux_in_path();
+    if (want_cpr || want_5522) {
+        std::string ask;
+        if (want_cpr)  ask += "\x1b[6n";
+        if (want_5522) ask += "\x1b[?5522$p";
+        ask += "\x1b[c";   // DA1 fence: every terminal answers, last
+        (void)platform::io_write_all(output_h, ask);
+
+        // `CSI rows ; cols R` → rows (erased), 0 if none complete yet.
         auto take_cpr = [](std::string& buf) -> int {
             for (std::size_t i = 0; i + 1 < buf.size(); ++i) {
                 if (buf[i] != '\x1b' || buf[i + 1] != '[') continue;
@@ -224,132 +235,76 @@ auto Device::create(Options cfg) -> Result<Device> {
             }
             return 0;
         };
+        // `CSI ? 5522 ; Ps $ y` → Ps (erased), -1 if absent.
+        auto take_rpm = [](std::string& buf) -> int {
+            const std::string_view pre = "\x1b[?5522;";
+            auto i = buf.find(pre);
+            if (i == std::string::npos) return -1;
+            std::size_t j = i + pre.size();
+            long ps = 0; bool digits = false;
+            for (; j < buf.size() && buf[j] >= '0' && buf[j] <= '9'; ++j) {
+                ps = ps * 10 + (buf[j] - '0'); digits = true;
+            }
+            if (!digits || j + 1 >= buf.size()) return -1;   // incomplete
+            if (buf[j] != '$' || buf[j + 1] != 'y') return -1;
+            buf.erase(i, j - i + 2);
+            return static_cast<int>(ps);
+        };
+        // Strip a complete DA1 reply (CSI ? … c); true when it has landed.
+        auto take_da1 = [](std::string& buf) -> bool {
+            auto i = buf.find("\x1b[?");
+            while (i != std::string::npos) {
+                std::size_t j = i + 3;
+                while (j < buf.size()
+                       && (buf[j] == ';' || (buf[j] >= '0' && buf[j] <= '9')))
+                    ++j;
+                if (j >= buf.size()) return false;   // incomplete → wait
+                if (buf[j] == 'c') { buf.erase(i, j - i + 1); return true; }
+                i = buf.find("\x1b[?", i + 1);
+            }
+            return false;
+        };
+        auto read_raw = [&]() -> std::string {
+            if (rt.inline_terminal_) {
+                if (auto r = rt.inline_terminal_->read_raw()) return *r;
+            } else if (rt.alt_terminal_) {
+                if (auto r = rt.alt_terminal_->read_raw()) return *r;
+            }
+            return {};
+        };
+        // The deadline is only a safety net for a pty that answers nothing.
         const auto deadline = std::chrono::steady_clock::now()
                             + std::chrono::milliseconds(150);
-        int row = 0;
+        std::string resp;
+        int row = 0, ps = -1;
+        bool fenced = false;
         while (std::chrono::steady_clock::now() < deadline) {
-            auto data = rt.inline_terminal_->read_raw();
-            if (data && !data->empty()) {
-                resp += *data;
-                if ((row = take_cpr(resp)) > 0) break;
+            auto data = read_raw();
+            if (!data.empty()) {
+                resp += data;
+                if (want_cpr && row == 0) row = take_cpr(resp);
+                if (want_5522 && ps < 0)  ps = take_rpm(resp);
+                // DA1 is answered last: once it's here, so is the rest.
+                if (take_da1(resp)) { fenced = true; break; }
             } else {
                 // Wake when the reply arrives, not on a timer.
                 (void)platform::io_poll_readable(rt.input_handle_, 2);
             }
         }
+        if (fenced) {   // a reply split across reads before the fence
+            if (want_cpr && row == 0) row = take_cpr(resp);
+            if (want_5522 && ps < 0)  ps = take_rpm(resp);
+        }
         if (row > 0) rt.inline_top_row_ = row;
-        // Any bytes that weren't the CPR (e.g. a keypress during the query)
-        // go through the parser now and are replayed on the first
-        // read_events() so no input is dropped.
+        if (ps >= 0)
+            rt.osc5522_support_ = (ps >= 1 && ps <= 4)
+                ? detail::Device::Osc5522::Supported
+                : detail::Device::Osc5522::Unsupported;
+        // Anything else that arrived (a keypress during the query) goes
+        // through the parser and is replayed on the first read_events().
         if (!resp.empty())
             for (auto& e : rt.parser_.feed(resp))
                 rt.startup_events_.push_back(std::move(e));
-    }
-
-    // ── OSC 5522 capability probe (DECRQM) ────────────────────────────
-    // Ask the terminal ONCE whether it implements the kitty multi-format
-    // clipboard family: `CSI ? 5522 $ p` → `CSI ? 5522 ; Ps $ y` where
-    // Ps 1..4 = mode known (supported), 0 = not recognized. Terminals that
-    // implement mode 5522 (rockorager's unsolicited-paste spec) MUST also
-    // implement the OSC 5522 read escape, so a recognized mode means image
-    // clipboard reads will be answered — the only escape path that carries
-    // IMAGE bytes over an SSH pty. Skipped inside tmux: tmux answers DECRQM
-    // itself for modes IT knows, telling us about tmux rather than the outer
-    // terminal — the query_clipboard tmux branch keeps its speculative
-    // dual-dialect send instead. Best-effort with a short deadline (same
-    // discipline as the DSR above): no answer → -1 → env sniffing decides.
-    {
-        // tmux ANYWHERE in the path (this host OR the ssh-local side — see
-        // ansi::tmux_in_path) answers DECRQM about itself, not the outer
-        // terminal, so the probe result would be meaningless — skip it and
-        // let the speculative tmux clipboard branch handle those cases.
-        const bool in_tmux = ansi::tmux_in_path();
-        if (!in_tmux) {
-            // DA1 fence: send Primary Device Attributes right behind the
-            // DECRQM. EVERY terminal answers DA1, and answers are ordered —
-            // the terminal processes the two queries in sequence — so when
-            // the DA1 reply arrives with no DECRPM reply in front of it,
-            // this terminal simply does not implement DECRQM and waiting
-            // out the deadline would burn the full 120 ms on EVERY startup
-            // (Terminal.app and most non-kitty-family terminals). With the
-            // fence, the no-support case costs one round-trip like the
-            // supported case; the deadline survives only as the safety net
-            // for a terminal that answers neither (piped/CI pty).
-            (void)platform::io_write_all(output_h, "\x1b[?5522$p\x1b[c");
-            // Extract `CSI ? 5522 ; Ps $ y`; returns Ps, or -1 if absent.
-            auto take_rpm = [](std::string& buf) -> int {
-                const std::string_view pre = "\x1b[?5522;";
-                auto i = buf.find(pre);
-                if (i == std::string::npos) return -1;
-                std::size_t j = i + pre.size();
-                long ps = 0; bool digits = false;
-                for (; j < buf.size() && buf[j] >= '0' && buf[j] <= '9'; ++j) {
-                    ps = ps * 10 + (buf[j] - '0'); digits = true;
-                }
-                if (!digits || j + 1 >= buf.size()) return -1;   // incomplete
-                if (buf[j] != '$' || buf[j + 1] != 'y') return -1;
-                buf.erase(i, j - i + 2);
-                return static_cast<int>(ps);
-            };
-            const auto deadline = std::chrono::steady_clock::now()
-                                + std::chrono::milliseconds(120);
-            // Strip a complete DA1 reply (CSI ? … c) from the buffer.
-            // Returns true when one was found — the fence has landed.
-            // A partial DECRPM ("\x1b[?5522;1$…") is never eaten: the scan
-            // stops at the first byte that is neither digit nor ';', and
-            // only a terminating 'c' matches.
-            auto take_da1 = [](std::string& buf) -> bool {
-                auto i = buf.find("\x1b[?");
-                while (i != std::string::npos) {
-                    std::size_t j = i + 3;
-                    while (j < buf.size()
-                           && (buf[j] == ';' || (buf[j] >= '0' && buf[j] <= '9')))
-                        ++j;
-                    if (j >= buf.size()) return false;   // incomplete → wait
-                    if (buf[j] == 'c') { buf.erase(i, j - i + 1); return true; }
-                    i = buf.find("\x1b[?", i + 1);
-                }
-                return false;
-            };
-            std::string resp2;
-            int ps = -1;
-            auto read_raw = [&]() -> std::string {
-                if (rt.inline_terminal_) {
-                    if (auto r = rt.inline_terminal_->read_raw()) return *r;
-                } else if (rt.alt_terminal_) {
-                    if (auto r = rt.alt_terminal_->read_raw()) return *r;
-                }
-                return {};
-            };
-            while (std::chrono::steady_clock::now() < deadline) {
-                auto data = read_raw();
-                if (!data.empty()) {
-                    resp2 += data;
-                    if ((ps = take_rpm(resp2)) >= 0) break;
-                    // DA1 landed with no DECRPM in front of it → the
-                    // terminal doesn't speak DECRQM; stop waiting now.
-                    if (take_da1(resp2)) break;
-                } else {
-                    (void)platform::io_poll_readable(rt.input_handle_, 2);
-                }
-            }
-            if (ps >= 0)
-                rt.osc5522_support_ = (ps >= 1 && ps <= 4)
-                    ? detail::Device::Osc5522::Supported
-                    : detail::Device::Osc5522::Unsupported;
-            // The DA1 fence reply may still be in the buffer (we break on
-            // the DECRPM as soon as it lands — the fence arrives behind
-            // it). Strip it so it is never replayed as input; if it is
-            // still in flight it lands in the startup DSR/poll reads and
-            // dies in the parser as an unknown CSI, which is harmless but
-            // this path is free.
-            (void)take_da1(resp2);
-            // Non-DECRPM bytes that arrived during the probe (keypresses)
-            // are parsed + replayed exactly like the DSR path above.
-            if (!resp2.empty())
-                for (auto& e : rt.parser_.feed(resp2))
-                    rt.startup_events_.push_back(std::move(e));
-        }
     }
 
     return ok(std::move(rt));

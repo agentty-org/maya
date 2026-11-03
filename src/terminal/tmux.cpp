@@ -14,6 +14,14 @@
 #include <string_view>
 #include <vector>
 
+#if !defined(_WIN32)
+#  include <fcntl.h>
+#  include <spawn.h>
+#  include <sys/wait.h>
+#  include <unistd.h>
+extern char** environ;
+#endif
+
 namespace maya::tmux {
 
 namespace {
@@ -69,18 +77,35 @@ bool detect_presence() {
 std::string ask_tmux(const char* /*format*/) { return {}; }
 #else
 std::string ask_tmux(const char* format) {
-    std::string cmd = "tmux display-message -p '";
-    cmd += format;
-    cmd += "' 2>/dev/null";
-    // NOLINTNEXTLINE(cert-env33-c) — fixed, argument-free command string;
-    // `format` is a compile-time literal from THIS file, never user input.
-    std::FILE* p = ::popen(cmd.c_str(), "r");
-    if (!p) return {};
+    // Spawn tmux directly with a pipe: popen would run `sh -c` first, a
+    // second process for nothing. `format` is a literal from this file.
+    int fds[2];
+    if (::pipe(fds) != 0) return {};
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_adddup2(&fa, fds[1], STDOUT_FILENO);
+    posix_spawn_file_actions_addopen(&fa, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+    posix_spawn_file_actions_addclose(&fa, fds[0]);
+    posix_spawn_file_actions_addclose(&fa, fds[1]);
+    char* argv[] = {const_cast<char*>("tmux"), const_cast<char*>("display-message"),
+                    const_cast<char*>("-p"), const_cast<char*>(format), nullptr};
+    pid_t pid = -1;
+    const int rc = ::posix_spawnp(&pid, "tmux", &fa, nullptr, argv, environ);
+    posix_spawn_file_actions_destroy(&fa);
+    ::close(fds[1]);
     std::string out;
-    std::array<char, 256> buf{};
-    while (std::fgets(buf.data(), static_cast<int>(buf.size()), p))
-        out += buf.data();
-    ::pclose(p);
+    if (rc == 0) {
+        std::array<char, 512> buf{};
+        for (;;) {
+            const ssize_t n = ::read(fds[0], buf.data(), buf.size());
+            if (n > 0) { out.append(buf.data(), static_cast<std::size_t>(n)); continue; }
+            if (n < 0 && errno == EINTR) continue;
+            break;
+        }
+        int status = 0;
+        while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+    }
+    ::close(fds[0]);
     while (!out.empty() && (out.back() == '\n' || out.back() == '\r'))
         out.pop_back();
     return out;
@@ -124,29 +149,29 @@ Probe& probe_locked() {
             // ssh-local topology ($TERM says tmux, but the server lives
             // on the OTHER host) yields empty answers, which correctly
             // degrade to "no features, no passthrough".
-            p.features = ask_tmux("#{client_termfeatures}");
-            const std::string pt =
-                ask_tmux("#{?#{==:#{allow-passthrough},on},1,"
-                         "#{?#{==:#{allow-passthrough},all},1,0}}");
-            p.passthrough = (pt == "1");
-            // get-clipboard: only request|both actually ask the terminal
-            // and relay its answer. The default `buffer` serves tmux's
-            // own paste buffer (text) and never consults the terminal,
-            // so an IMAGE read can never succeed under it.
-            const std::string gc =
-                ask_tmux("#{?#{==:#{get-clipboard},request},1,"
-                         "#{?#{==:#{get-clipboard},both},1,0}}");
-            p.clip_relay = (gc == "1");
-            // Identity of the client these answers describe. Cheap enough to
-            // re-ask later (one round-trip) to decide whether the cached
-            // verdict is still about the terminal the user is looking at.
-            // history_limit rides the same round-trip.
-            const std::string id_hl =
-                ask_tmux("#{client_tty}/#{client_termname} #{history_limit}");
-            const auto sp = id_hl.rfind(' ');
-            p.client_id = sp == std::string::npos ? id_hl : id_hl.substr(0, sp);
-            if (sp != std::string::npos)
-                p.history_limit = std::max(0, std::atoi(id_hl.c_str() + sp + 1));
+            // ONE round-trip for every answer: each ask_tmux is a sh + tmux
+            // spawn (~5 ms), and four of them in a row were ~20 ms of every
+            // launch under tmux. Fields are split on a byte no answer
+            // contains (\x1f, unit separator).
+            const std::string all = ask_tmux(
+                "#{client_termfeatures}\x1f"
+                "#{?#{==:#{allow-passthrough},on},1,#{?#{==:#{allow-passthrough},all},1,0}}\x1f"
+                "#{?#{==:#{get-clipboard},request},1,#{?#{==:#{get-clipboard},both},1,0}}\x1f"
+                "#{client_tty}/#{client_termname}\x1f"
+                "#{history_limit}");
+            std::array<std::string, 5> f{};
+            std::size_t at = 0;
+            for (std::size_t i = 0; i < f.size(); ++i) {
+                const auto sep = all.find('\x1f', at);
+                f[i] = all.substr(at, sep == std::string::npos ? std::string::npos : sep - at);
+                if (sep == std::string::npos) break;
+                at = sep + 1;
+            }
+            p.features      = f[0];
+            p.passthrough   = (f[1] == "1");
+            p.clip_relay    = (f[2] == "1");
+            p.client_id     = f[3];
+            p.history_limit = std::max(0, std::atoi(f[4].c_str()));
         }
     }
     return p;
