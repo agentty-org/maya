@@ -87,8 +87,12 @@ std::string ask_tmux(const char* format) {
     posix_spawn_file_actions_addopen(&fa, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
     posix_spawn_file_actions_addclose(&fa, fds[0]);
     posix_spawn_file_actions_addclose(&fa, fds[1]);
-    char* argv[] = {const_cast<char*>("tmux"), const_cast<char*>("display-message"),
-                    const_cast<char*>("-p"), const_cast<char*>(format), nullptr};
+    // posix_spawn's argv is char* const[] for historical reasons; it never
+    // writes through it. Writable copies say so without a const_cast (which
+    // the banlist rightly treats as a possible Frozen break).
+    char a0[] = "tmux", a1[] = "display-message", a2[] = "-p";
+    std::string a3{format};
+    char* argv[] = {a0, a1, a2, a3.data(), nullptr};
     pid_t pid = -1;
     const int rc = ::posix_spawnp(&pid, "tmux", &fa, nullptr, argv, environ);
     posix_spawn_file_actions_destroy(&fa);
