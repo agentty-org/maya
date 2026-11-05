@@ -23,10 +23,12 @@
 #include "check.hpp"
 
 #include <fcntl.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 #include <print>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace maya;
@@ -36,11 +38,23 @@ namespace {
 
 std::pair<Writer, int> make_pipe_writer() {
     int fds[2];
+#if defined(__linux__)
     (void)pipe(fds);
-    fcntl(fds[1], F_SETFL, fcntl(fds[1], F_GETFL, 0) | O_NONBLOCK);
-    fcntl(fds[0], F_SETFL, fcntl(fds[0], F_GETFL, 0) | O_NONBLOCK);
     // The pipe must hold a whole replay frame without blocking.
     (void)fcntl(fds[1], F_SETPIPE_SZ, 1 << 20);
+#else
+    // No F_SETPIPE_SZ off Linux and darwin pipes cap near 64 KiB, less
+    // than a replay frame. A socketpair's buffer can be raised instead.
+    (void)socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
+    int sz = 1 << 20;
+    (void)setsockopt(fds[0], SOL_SOCKET, SO_SNDBUF, &sz, sizeof sz);
+    (void)setsockopt(fds[0], SOL_SOCKET, SO_RCVBUF, &sz, sizeof sz);
+    (void)setsockopt(fds[1], SOL_SOCKET, SO_SNDBUF, &sz, sizeof sz);
+    (void)setsockopt(fds[1], SOL_SOCKET, SO_RCVBUF, &sz, sizeof sz);
+    std::swap(fds[0], fds[1]);   // keep fds[1] = write end, as with pipe()
+#endif
+    fcntl(fds[1], F_SETFL, fcntl(fds[1], F_GETFL, 0) | O_NONBLOCK);
+    fcntl(fds[0], F_SETFL, fcntl(fds[0], F_GETFL, 0) | O_NONBLOCK);
     return {Writer{static_cast<platform::NativeHandle>(fds[1])}, fds[0]};
 }
 
