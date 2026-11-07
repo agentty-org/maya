@@ -620,18 +620,14 @@ public:
                     return measure_element(el, w > 0 ? w : 1).width.value;
                 };
 
-                // The profile chip — the must-keep right anchor. A solid
-                // chip, same idiom as the tool cards' name chips.
+                // The profile chip — the must-keep right anchor.
                 std::vector<Element> chip_parts;
-                Style chip_st = Style{}.with_fg(ri.profile_color).with_inverse().with_bold();
-                if (theme::live().resolve(ri.profile_color).has_channels())
-                    chip_st = Style{}.with_bg(ri.profile_color)
-                                     .with_fg(Color::slot(ThemeSlot::InverseText))
-                                     .with_bold();
-                std::string label{ri.profile_label};
-                for (auto& c : label)
-                    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-                chip_parts.push_back(text(" " + label + " ", chip_st));
+                chip_parts.push_back(text("\xe2\x96\x8e",
+                    Style{}.with_fg(ri.profile_color)));
+                chip_parts.push_back(text(" "));
+                chip_parts.push_back(text(
+                    small_caps_(ri.profile_label),
+                    Style{}.with_fg(ri.profile_color).with_bold()));
                 Element chip = h(std::move(chip_parts)).build();
                 const int chip_cols = width_of(chip);
 
