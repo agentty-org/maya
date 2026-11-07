@@ -114,7 +114,8 @@ struct ResumeState {
 
 static Element highlight_code_from(const std::string& code,
                                    const std::string& lang_tag,
-                                   ResumeState* resume);
+                                   ResumeState* resume,
+                                   bool with_gutter = true);
 
 // highlight_code_from — tokeniser + gutter pass, with an optional incremental
 // resume path (see ResumeState). When `resume` is non-null and holds a valid
@@ -125,7 +126,8 @@ static Element highlight_code_from(const std::string& code,
 // animation clips by byte offset.
 static Element highlight_code_from(const std::string& code,
                                    const std::string& lang_tag,
-                                   ResumeState* resume) {
+                                   ResumeState* resume,
+                                   bool with_gutter) {
     LangId lang = detect_lang(lang_tag);
 
     // Special case: diff gets its own highlighter
@@ -571,7 +573,7 @@ static Element highlight_code_from(const std::string& code,
         // loses its line-number column mid-stream. (reveal_scrollback_test
         // cb-fold scenario caught the threshold flip at the 4→5 boundary.)
         constexpr int kGutterMinLines = 1;
-        if (line_count >= kGutterMinLines) {
+        if (with_gutter && line_count >= kGutterMinLines) {
             // Width of the line-number column. log10-style.
             //
             // STABILITY CONTRACT: a code block streamed incrementally
@@ -807,6 +809,55 @@ static Element highlight_code(const std::string& code, const std::string& lang_t
     }
     cache.push_back({key, elem});
     return elem;
+}
+
+// ── Token spans per line, for tool bodies ───────────────────────────────
+// Same tokeniser as markdown fences, without the gutter. Offsets are relative
+// to each line. Empty when the language is unknown or highlighting is off.
+std::vector<std::vector<StyledRun>> syntax_line_runs(std::string_view code,
+                                                     std::string_view lang) {
+    std::vector<std::vector<StyledRun>> lines;
+    if (!syntax_highlighting() || code.empty()) return lines;
+    const LangId id = detect_lang(lang);
+    if (id == LangId::Unknown || id == LangId::Diff) return lines;
+
+    struct Entry { uint64_t key; std::vector<std::vector<StyledRun>> v; };
+    thread_local std::vector<Entry> cache;
+    uint64_t key = 14695981039346656037ULL;
+    for (unsigned char c : lang) { key ^= c; key *= 1099511628211ULL; }
+    key ^= 0xffu; key *= 1099511628211ULL;
+    for (unsigned char c : code) { key ^= c; key *= 1099511628211ULL; }
+    for (const auto& e : cache) if (e.key == key) return e.v;
+
+    Element el = highlight_code_from(std::string{code}, std::string{lang},
+                                     nullptr, /*with_gutter=*/false);
+    const auto* t = std::get_if<TextElement>(&el.inner);
+    if (!t) return lines;
+    const std::string& out = t->content;
+
+    std::size_t pos = 0;
+    for (;;) {
+        const auto nl  = out.find('\n', pos);
+        const auto end = nl == std::string::npos ? out.size() : nl;
+        std::vector<StyledRun> line;
+        for (const auto& r : t->runs) {
+            const std::size_t rs = r.byte_offset, re = rs + r.byte_length;
+            if (re <= pos || rs >= end) continue;
+            const std::size_t a = std::max(rs, pos), b = std::min(re, end);
+            if (b > a) line.push_back({a - pos, b - a, r.style});
+        }
+        std::sort(line.begin(), line.end(),
+                  [](const StyledRun& x, const StyledRun& y) {
+                      return x.byte_offset < y.byte_offset;
+                  });
+        lines.push_back(std::move(line));
+        if (nl == std::string::npos) break;
+        pos = nl + 1;
+    }
+
+    if (cache.size() >= 64) cache.erase(cache.begin(), cache.begin() + 32);
+    cache.push_back({key, lines});
+    return lines;
 }
 
 // ── Cross-TU bridge ──────────────────────────────────────────────────

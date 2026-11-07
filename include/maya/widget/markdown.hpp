@@ -107,6 +107,12 @@ void set_markdown_palette(const MarkdownPalette& p);
 void set_syntax_highlighting(bool on) noexcept;
 [[nodiscard]] bool syntax_highlighting() noexcept;
 
+/// Syntax token spans for each line of `code` (offsets relative to that
+/// line), using the markdown fence tokeniser. `lang` is a fence tag or file
+/// extension ("cpp", "py", "rs"). Empty when the language is unknown.
+[[nodiscard]] std::vector<std::vector<StyledRun>>
+syntax_line_runs(std::string_view code, std::string_view lang);
+
 /// Project a Theme onto the markdown palette.
 ///
 /// Markdown is where most of a TUI's text actually lives — prose, code

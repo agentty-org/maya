@@ -31,6 +31,7 @@
 //   }}.build();
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <optional>
@@ -46,6 +47,7 @@
 #include "../style/color.hpp"
 #include "../style/style.hpp"
 #include "../style/theme.hpp"
+#include "markdown.hpp"   // syntax_line_runs
 
 namespace maya {
 
@@ -124,6 +126,28 @@ public:
         // to scan and cross-reference. std::set keeps lookup logarithmic
         // and gives the deterministic ascending order the summary needs.
         std::set<int> highlight_lines;
+
+        // Language of the code in the body: a file extension or fence tag
+        // ("cpp", "py", "rs"). Read / write / edit / diff rows are syntax
+        // coloured with it. Empty = flat colour, as before.
+        std::string lang;
+
+        // The literal text a search was LOOKING FOR, highlighted in place
+        // wherever it appears in a GrepMatches body.
+        //
+        // Without it a match row is one flat span and the user re-scans each
+        // line hunting for the thing they just searched for -- the structure
+        // (grouped by file, line-numbered) was already right, but every
+        // character carried equal weight. maya's own SearchResults widget
+        // renders before/MATCH/after for exactly this reason; this brings
+        // that emphasis to the body a tool card can actually use.
+        //
+        // LITERAL, not a regex. A caller passing a pattern gets highlighting
+        // only where the pattern happens to be literal text -- which is the
+        // common case (`cfg.status`, `TextWrap::Truncate`) and costs nothing
+        // when it is not. Running a regex engine per row, per frame, on a
+        // pattern the user may have mistyped is not worth it.
+        std::string match_needle;
 
         // Suppress placeholder rendering. Default behaviour for an empty
         // body in a Running tool is to render NOTHING — the timeline's
@@ -866,6 +890,7 @@ private:
                                      : blank();
         }
         const auto p = elide(cfg_.text, cfg_.read_head, /*tail=*/0);
+        const auto syn = syntax_lines(p.lines);
 
         // Gutter (line numbers) dim; pipe carries the category band.
         const Style gutter_st = Style{}.with_fg(muted());
@@ -916,8 +941,13 @@ private:
             runs.push_back({pipe_off, 5,        pipe_st});
             const std::size_t code_off = content.size();
             content += ln;
-            if (!ln.empty())
-                runs.push_back({code_off, ln.size(), hi ? hi_code_st : code_st});
+            if (!ln.empty()) {
+                for (auto r : paint_runs(ln, hi ? hi_code_st : code_st,
+                                         hit_style(), syn_at(syn, i))) {
+                    r.byte_offset += code_off;
+                    runs.push_back(r);
+                }
+            }
 
             rows.push_back(Element{TextElement{
                 .content = std::move(content),
@@ -1022,11 +1052,17 @@ private:
         // 16-color fallback: plain green fg, no band (see diff_bands_ok).
         const bool  bands   = diff_bands_ok();
         const Style num_st  = bands
-            ? Style{}.with_bg(add_bg).with_fg(diff_palette::add_fg)
-            : Style{}.with_fg(Color::slot(ThemeSlot::Success)).with_dim();
-        const Style code_st = bands
             ? Style{}.with_bg(add_bg).with_fg(diff_palette::add_fg_hi).with_bold()
+            : Style{}.with_fg(Color::slot(ThemeSlot::Success)).with_dim();
+        // Same weight as edit_diff's `+` side: plain add_fg on the band, no
+        // bold. A write is one big addition, so it should read identically.
+        const Style code_st = bands
+            ? Style{}.with_bg(add_bg).with_fg(diff_palette::add_fg)
             : Style{}.with_fg(Color::slot(ThemeSlot::Success));
+        // Needle hits brighten + bold inside the band; bg stays put.
+        const Style hit_st = bands
+            ? Style{}.with_bg(add_bg).with_fg(Color::hex(0xFFFFFF)).with_bold()
+            : Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_bold();
 
         std::vector<Element> rows;
         rows.reserve(p.lines.size() + 2);
@@ -1042,20 +1078,25 @@ private:
         // written, not a restart at 1. Default start_line=1 keeps the
         // classic behaviour for full bodies.
         int line_num = cfg_.start_line + p.elided + p.hidden_above;
+        const auto syn = syntax_lines(p.lines);
         for (std::size_t i = 0; i < p.lines.size(); ++i) {
             char numbuf[8];
             std::snprintf(numbuf, sizeof(numbuf), "%3d ", line_num++);
             if (bands) {
-                rows.push_back(band_row(numbuf, num_st,
-                                        std::string{p.lines[i]}, code_st, add_bg));
+                rows.push_back(band_row_hl(numbuf, num_st,
+                                           std::string{p.lines[i]}, code_st,
+                                           hit_st, add_bg, syn_at(syn, int(i))));
             } else {
                 std::string out = numbuf;
                 const std::size_t gl = out.size();
                 out += p.lines[i];
                 std::vector<StyledRun> runs;
                 runs.push_back({0, gl, num_st});
-                if (out.size() > gl)
-                    runs.push_back({gl, out.size() - gl, code_st});
+                for (auto r : paint_runs(p.lines[i], code_st, hit_st,
+                                         syn_at(syn, int(i)))) {
+                    r.byte_offset += gl;
+                    runs.push_back(r);
+                }
                 rows.push_back(Element{TextElement{
                     .content = std::move(out),
                     .style   = {},
@@ -1168,6 +1209,256 @@ private:
                     .runs    = std::move(runs),
                 }};
             }).grow(1.0f);
+    }
+
+    // Same as band_row, but the body gets syntax colours (`syn`) and needle
+    // hits painted over it. Both only change fg/weight, never the bg, so the
+    // band stays solid.
+    [[nodiscard]] Element band_row_hl(std::string gutter, Style gutter_st,
+                                      std::string body, Style body_st,
+                                      Style hit_st, Color bg,
+                                      const std::vector<StyledRun>* syn = nullptr) const {
+        using namespace dsl;
+        auto body_runs = paint_runs(body, body_st, hit_st, syn);
+        if (body_runs.empty()
+            || (body_runs.size() == 1 && body_runs[0].style == body_st))
+            return band_row(std::move(gutter), gutter_st,
+                            std::move(body), body_st, bg);
+        return component(
+            [gutter = std::move(gutter), gutter_st,
+             body = std::move(body), bg,
+             body_runs = std::move(body_runs)](int w, int) -> Element {
+                std::string out = gutter + body;
+                const int used  = string_width(out);
+                const int width = (w > 0 && w < 2000) ? w : used;
+                if (used < width)
+                    out.append(static_cast<std::size_t>(width - used), ' ');
+
+                const std::size_t gl = gutter.size();
+                const std::size_t bl = body.size();
+                std::vector<StyledRun> runs;
+                runs.reserve(body_runs.size() + 2);
+                if (gl) runs.push_back({0, gl, gutter_st});
+                for (auto r : body_runs) {
+                    r.byte_offset += gl;
+                    runs.push_back(r);
+                }
+                if (out.size() > gl + bl)
+                    runs.push_back({gl + bl, out.size() - gl - bl,
+                                    Style{}.with_bg(bg)});
+
+                return Element{TextElement{
+                    .content = std::move(out),
+                    .style   = Style{}.with_bg(bg),
+                    .wrap    = TextWrap::TruncateEnd,
+                    .runs    = std::move(runs),
+                }};
+            }).grow(1.0f);
+    }
+
+    // ── Syntax colouring for code rows ───────────────────────────────────────
+    using LineRuns = std::vector<std::vector<StyledRun>>;
+
+    // WCAG relative luminance / contrast ratio.
+    static double rel_lum(int r, int g, int b) {
+        auto f = [](int v) {
+            const double s = v / 255.0;
+            return s <= 0.03928 ? s / 12.92 : std::pow((s + 0.055) / 1.055, 2.4);
+        };
+        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+    }
+
+    // `fg` adjusted so it reaches `target` contrast on `bg`: same hue and
+    // saturation, lightness moved away from the background (up on dark,
+    // down on light). Unchanged when it already reads, or when either
+    // colour is a palette entry we can't measure.
+    static Color readable_on(Color fg, Color bg, double target) {
+        const auto& th = theme::live();
+        const auto f = th.resolve(fg);
+        const auto b = th.resolve(bg);
+        if (!f.has_channels() || !b.has_channels()) return fg;
+        const double lb = rel_lum(b.r(), b.g(), b.b());
+        auto ratio = [&](double lf) {
+            return lf > lb ? (lf + 0.05) / (lb + 0.05) : (lb + 0.05) / (lf + 0.05);
+        };
+        if (ratio(rel_lum(f.r(), f.g(), f.b())) >= target) return fg;
+
+        // rgb -> hsl
+        const double r = f.r() / 255.0, g = f.g() / 255.0, bl = f.b() / 255.0;
+        const double mx = std::max({r, g, bl}), mn = std::min({r, g, bl});
+        double h = 0, s = 0, l = (mx + mn) / 2;
+        if (mx != mn) {
+            const double d = mx - mn;
+            s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+            if (mx == r)      h = (g - bl) / d + (g < bl ? 6 : 0);
+            else if (mx == g) h = (bl - r) / d + 2;
+            else              h = (r - g) / d + 4;
+            h /= 6;
+        }
+        auto hue = [](double p, double q, double t) {
+            if (t < 0) t += 1;
+            if (t > 1) t -= 1;
+            if (t < 1.0 / 6) return p + (q - p) * 6 * t;
+            if (t < 0.5)     return q;
+            if (t < 2.0 / 3) return p + (q - p) * (2.0 / 3 - t) * 6;
+            return p;
+        };
+        auto to_rgb = [&](double L) {
+            if (s == 0) {
+                const auto v = static_cast<uint8_t>(L * 255 + 0.5);
+                return Color::rgb(v, v, v);
+            }
+            const double q = L < 0.5 ? L * (1 + s) : L + s - L * s;
+            const double p = 2 * L - q;
+            return Color::rgb(static_cast<uint8_t>(hue(p, q, h + 1.0 / 3) * 255 + 0.5),
+                              static_cast<uint8_t>(hue(p, q, h) * 255 + 0.5),
+                              static_cast<uint8_t>(hue(p, q, h - 1.0 / 3) * 255 + 0.5));
+        };
+        const bool dark_bg = lb < 0.18;
+        Color out = fg;
+        for (int step = 0; step < 20; ++step) {
+            l = dark_bg ? std::min(0.95, l + 0.03) : std::max(0.05, l - 0.03);
+            const auto c = to_rgb(l);
+            out = c;
+            if (ratio(rel_lum(c.r(), c.g(), c.b())) >= target) break;
+            if (l <= 0.05 || l >= 0.95) break;
+        }
+        return out;
+    }
+
+    // A plain (no band) row: gutter, then code with syntax + hit colours.
+    [[nodiscard]] Element code_row(std::string gutter, Style gutter_st,
+                                   std::string_view code, Style base,
+                                   Style hit,
+                                   const std::vector<StyledRun>* syn) const {
+        std::string out = std::move(gutter);
+        const std::size_t gl = out.size();
+        out += code;
+        std::vector<StyledRun> runs;
+        if (gl) runs.push_back({0, gl, gutter_st});
+        for (auto r : paint_runs(code, base, hit, syn)) {
+            r.byte_offset += gl;
+            runs.push_back(r);
+        }
+        return Element{TextElement{
+            .content = std::move(out),
+            .style   = {},
+            .wrap    = TextWrap::TruncateEnd,
+            .runs    = std::move(runs),
+        }};
+    }
+
+    // Tokenise the visible lines as one block, so multi-line comments and
+    // strings carry across rows. Empty when cfg_.lang is unset/unknown.
+    [[nodiscard]] LineRuns syntax_lines(
+            const std::vector<std::string_view>& lines) const {
+        if (cfg_.lang.empty() || lines.empty()) return {};
+        std::string joined;
+        for (std::size_t i = 0; i < lines.size(); ++i) {
+            if (i) joined += '\n';
+            joined += lines[i];
+        }
+        return syntax_line_runs(joined, cfg_.lang);
+    }
+    [[nodiscard]] static const std::vector<StyledRun>*
+    syn_at(const LineRuns& r, int i) {
+        return (i >= 0 && std::size_t(i) < r.size()) ? &r[std::size_t(i)]
+                                                     : nullptr;
+    }
+
+    // Theme text, bold: the searched-for literal reads white over code.
+    [[nodiscard]] static Style hit_style() {
+        return Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_bold();
+    }
+
+    // Runs for one line of code: syntax colours over `base`, then needle
+    // hits on top. Token fg wins, but bg/dim/bold from `base` are kept so a
+    // diff band stays solid. `hit` likewise only changes fg + bold.
+    [[nodiscard]] std::vector<StyledRun> paint_runs(
+            std::string_view line, Style base, Style hit,
+            const std::vector<StyledRun>* syn) const {
+        const std::size_t n = line.size();
+        std::vector<Style> per;   // style per byte, only built when needed
+        const auto spans = needle_spans(line);
+        if ((!syn || syn->empty()) && spans.empty())
+            return n ? std::vector<StyledRun>{{0, n, base}}
+                     : std::vector<StyledRun>{};
+        per.assign(n, base);
+        // Keep each token's theme colour when it already reads on its
+        // background; otherwise raise only its lightness (saturation kept)
+        // until it does. Diff bands want more contrast than the panel.
+        const Color against = base.bg ? *base.bg
+                                      : Color::slot(ThemeSlot::Background);
+        const double target = base.bg ? 6.0 : 4.5;
+        auto lift = [&](Color c) { return readable_on(c, against, target); };
+        if (syn) {
+            for (const auto& r : *syn) {
+                const std::size_t e = std::min(n, r.byte_offset + r.byte_length);
+                for (std::size_t k = r.byte_offset; k < e; ++k) {
+                    Style s = base;
+                    if (r.style.fg) s.fg = lift(*r.style.fg);
+                    s.italic = r.style.italic;
+                    s.bold   = base.bold || r.style.bold;
+                    per[k] = s;
+                }
+            }
+        }
+        for (auto [off, len] : spans)
+            for (std::size_t k = off; k < std::min(n, off + len); ++k) {
+                Style s = per[k];
+                s.fg = hit.fg; s.bold = true; s.dim = false; s.italic = false;
+                per[k] = s;
+            }
+        std::vector<StyledRun> out;
+        for (std::size_t k = 0; k < n;) {
+            std::size_t j = k + 1;
+            while (j < n && per[j] == per[k]) ++j;
+            out.push_back({k, j - k, per[k]});
+            k = j;
+        }
+        return out;
+    }
+
+    // Byte spans of every case-insensitive occurrence of cfg_.match_needle in
+    // `hay`. Empty when no needle is set, so callers pay nothing by default.
+    // match_needle may hold SEVERAL alternatives separated by '\n' (a literal
+    // alternation like `foo|bar` split host-side); each is matched and the
+    // leftmost-longest wins, so spans never overlap.
+    [[nodiscard]] std::vector<std::pair<std::size_t, std::size_t>>
+    needle_spans(std::string_view hay) const {
+        std::vector<std::pair<std::size_t, std::size_t>> out;
+        if (cfg_.match_needle.empty() || hay.empty()) return out;
+        auto fold = [](char c) -> char {
+            return (c >= 'A' && c <= 'Z') ? char(c - 'A' + 'a') : c;
+        };
+        auto matches_at = [&](std::string_view n, std::size_t i) {
+            if (i + n.size() > hay.size()) return false;
+            for (std::size_t k = 0; k < n.size(); ++k)
+                if (fold(hay[i + k]) != fold(n[k])) return false;
+            return true;
+        };
+
+        const std::string_view all{cfg_.match_needle};
+        for (std::size_t i = 0; i < hay.size();) {
+            std::size_t best = 0;
+            for (std::size_t s = 0; s <= all.size();) {
+                const auto e = all.find('\n', s);
+                const auto n = all.substr(s, (e == std::string_view::npos)
+                                                 ? std::string_view::npos
+                                                 : e - s);
+                if (!n.empty() && n.size() > best && matches_at(n, i))
+                    best = n.size();
+                if (e == std::string_view::npos) break;
+                s = e + 1;
+            }
+            if (best > 0) {
+                out.push_back({i, best});
+                i += best;
+            } else {
+                ++i;
+            }
+        }
+        return out;
     }
 
     // ── EditDiff: per-hunk header + −/+ lines with head+tail per side ─────
@@ -1381,28 +1672,35 @@ private:
         const Style body_st = bands
             ? Style{}.with_bg(bg).with_fg(fg_br)
             : Style{}.with_fg(is_add ? Color::slot(ThemeSlot::Success) : Color::slot(ThemeSlot::Error));
+        // Needle hits stay INSIDE the band: brighten + bold the span, never
+        // change its bg, so the red/green rectangle stays unbroken.
+        const Style hit_st = bands
+            ? Style{}.with_bg(bg).with_fg(Color::hex(0xFFFFFF)).with_bold()
+            : Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_bold();
 
         std::string gutter = " ";
         gutter += marker;
         gutter += " ";          // " + " / " - " — 3-col sign gutter
+        const auto syn = syntax_lines(p.lines);
 
         for (int i = 0; i < static_cast<int>(p.lines.size()); ++i) {
             if (i == p.elision_at && p.elided > 0)
                 rows.push_back(elision_marker(p.elided));
             if (bands) {
-                rows.push_back(band_row(gutter, sign_st,
-                                        std::string{p.lines[std::size_t(i)]},
-                                        body_st, bg));
+                rows.push_back(band_row_hl(gutter, sign_st,
+                                           std::string{p.lines[std::size_t(i)]},
+                                           body_st, hit_st, bg, syn_at(syn, i)));
             } else {
-                // Plain fg row: " + content" — sign gutter + body, two
-                // styled runs, no band, no pipe separator.
+                // Plain fg row: " + content" — sign gutter + body, no band.
                 std::string out = gutter;
                 out += p.lines[std::size_t(i)];
                 std::vector<StyledRun> runs;
                 runs.push_back({0, gutter.size(), sign_st});
-                if (out.size() > gutter.size())
-                    runs.push_back({gutter.size(), out.size() - gutter.size(),
-                                    body_st});
+                for (auto r : paint_runs(p.lines[std::size_t(i)], body_st,
+                                         hit_st, syn_at(syn, i))) {
+                    r.byte_offset += gutter.size();
+                    runs.push_back(r);
+                }
                 rows.push_back(Element{TextElement{
                     .content = std::move(out),
                     .style   = {},
@@ -1486,6 +1784,14 @@ private:
         const Style rem_body_st = bands
             ? Style{}.with_bg(rem_bg).with_fg(diff_palette::rem_fg)
             : Style{}.with_fg(Color::slot(ThemeSlot::Error));
+        // Needle hits ride the same band, brightened + bold, so the span the
+        // tool searched for pops without breaking the red/green rectangle.
+        const Style add_hit_st = bands
+            ? Style{}.with_bg(add_bg).with_fg(Color::hex(0xFFFFFF)).with_bold()
+            : Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_bold();
+        const Style rem_hit_st = bands
+            ? Style{}.with_bg(rem_bg).with_fg(Color::hex(0xFFFFFF)).with_bold()
+            : Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_bold();
         const Style hunk_st     = bands
             ? Style{}.with_fg(hunk_fg).with_bg(hunk_bg).with_bold()
             : Style{}.with_fg(Color::slot(ThemeSlot::Primary)).with_bold();
@@ -1549,6 +1855,19 @@ private:
 
         std::vector<Element> rows;
         rows.reserve(p.lines.size() + 1);
+        // Code text of every content row (sign stripped), tokenised as one
+        // block so syntax colours line up by row index.
+        std::vector<std::string_view> code_lines(p.lines.size());
+        for (std::size_t k = 0; k < p.lines.size(); ++k) {
+            const auto l = p.lines[k];
+            if (l.starts_with("@@") || l.starts_with("+++ ") || l.starts_with("--- "))
+                continue;
+            if (!l.empty() && (l[0] == '+' || l[0] == '-' || l[0] == ' '))
+                code_lines[k] = l.substr(1);
+            else
+                code_lines[k] = l;
+        }
+        const auto syn = syntax_lines(code_lines);
         for (int i = 0; i < static_cast<int>(p.lines.size()); ++i) {
             if (i == p.elision_at && p.elided > 0) {
                 rows.push_back(elision_marker(p.elided));
@@ -1612,22 +1931,24 @@ private:
                 auto g = num_gutter(new_ln, '+');
                 if (have_nums) ++new_ln;
                 if (bands)
-                    rows.push_back(band_row(std::move(g), add_sign_st,
-                                            std::string{ln.substr(1)},
-                                            add_body_st, add_bg));
+                    rows.push_back(band_row_hl(std::move(g), add_sign_st,
+                                               std::string{ln.substr(1)},
+                                               add_body_st, add_hit_st, add_bg,
+                                               syn_at(syn, i)));
                 else
-                    rows.push_back(text_row(g + std::string{ln.substr(1)},
-                                            add_body_st));
+                    rows.push_back(code_row(std::move(g), add_sign_st, ln.substr(1),
+                                            add_body_st, add_hit_st, syn_at(syn, i)));
             } else if (!ln.empty() && ln[0] == '-') {
                 auto g = num_gutter(old_ln, '-');
                 if (have_nums) ++old_ln;
                 if (bands)
-                    rows.push_back(band_row(std::move(g), rem_sign_st,
-                                            std::string{ln.substr(1)},
-                                            rem_body_st, rem_bg));
+                    rows.push_back(band_row_hl(std::move(g), rem_sign_st,
+                                               std::string{ln.substr(1)},
+                                               rem_body_st, rem_hit_st, rem_bg,
+                                               syn_at(syn, i)));
                 else
-                    rows.push_back(text_row(g + std::string{ln.substr(1)},
-                                            rem_body_st));
+                    rows.push_back(code_row(std::move(g), rem_sign_st, ln.substr(1),
+                                            rem_body_st, rem_hit_st, syn_at(syn, i)));
             } else {
                 // Context line — unchanged code, plain dim, NEW-side line
                 // number in the gutter so the eye can track position
@@ -1643,7 +1964,8 @@ private:
                 } else {
                     g = "   ";
                 }
-                rows.push_back(text_row(g + std::string{body}, ctx_st));
+                rows.push_back(code_row(std::move(g), ctx_st, body, ctx_st,
+                                        hit_style(), syn_at(syn, i)));
             }
         }
         return v(rows).build();
@@ -1769,6 +2091,10 @@ private:
         const Style num_st  = Style{}.with_fg(muted());                 // gutter
         const Style body_st = Style{}.with_fg(cfg_.text_color);         // match
         const Style raw_st  = Style{}.with_fg(cfg_.text_color);
+        // The searched-for text itself: the theme's text colour, bold, so it
+        // reads white against the dim body.
+        const Style hit_st  = Style{}.with_fg(Color::slot(ThemeSlot::Text))
+                                     .with_bold();
 
         std::vector<Element> rows;
         rows.reserve(static_cast<std::size_t>(shown) + 4);
@@ -1798,7 +2124,40 @@ private:
             content += "  ";
             const std::size_t rest_off = content.size();
             content += m.rest;
-            runs.push_back({rest_off, m.rest.size(), body_st});
+            // Emphasise what the search was LOOKING FOR, in place.
+            //
+            // A grep's whole job is to point at a thing; a row painted one
+            // flat colour points at nothing and makes the reader redo the
+            // search by eye. The structure here (grouped by file, aligned
+            // line numbers) was already right -- only the emphasis was
+            // missing. maya's SearchResults widget renders before/HIT/after
+            // for the same reason.
+            //
+            // EVERY occurrence, not just the first: a line like
+            // `wrap == Truncate || node.wrap == Truncate` is exactly where
+            // this earns its keep.
+            const std::string& needle = cfg_.match_needle;
+            if (!needle.empty()) {
+                // needle_spans folds case (grep defaults to insensitive) and
+                // handles a '\n'-separated alternation, so `foo|bar` lights up
+                // both. Spans are exact byte offsets into the original text.
+                const auto spans = needle_spans(m.rest);
+                if (spans.empty()) {
+                    runs.push_back({rest_off, m.rest.size(), body_st});
+                } else {
+                    std::size_t at = 0;
+                    for (auto [off, len] : spans) {
+                        if (off > at)
+                            runs.push_back({rest_off + at, off - at, body_st});
+                        runs.push_back({rest_off + off, len, hit_st});
+                        at = off + len;
+                    }
+                    if (at < m.rest.size())
+                        runs.push_back({rest_off + at, m.rest.size() - at, body_st});
+                }
+            } else {
+                runs.push_back({rest_off, m.rest.size(), body_st});
+            }
             rows.push_back(Element{TextElement{
                 .content = std::move(content),
                 .style   = {},
@@ -2073,8 +2432,28 @@ private:
         if (!marker.empty())
             runs.push_back({marker_off, marker.size(), marker_style});
         runs.push_back({pipe_off, 5, pipe_style});
-        if (!content.empty())
-            runs.push_back({content_off, content.size(), content_style});
+        if (!content.empty()) {
+            // Light up the searched-for literal wherever it appears in the
+            // row. Falls back to one flat run when there's no needle.
+            const auto spans = needle_spans(content);
+            if (spans.empty()) {
+                runs.push_back({content_off, content.size(), content_style});
+            } else {
+                const Style hit_style =
+                    Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_bold();
+                std::size_t at = 0;
+                for (auto [off, len] : spans) {
+                    if (off > at)
+                        runs.push_back({content_off + at, off - at,
+                                        content_style});
+                    runs.push_back({content_off + off, len, hit_style});
+                    at = off + len;
+                }
+                if (at < content.size())
+                    runs.push_back({content_off + at, content.size() - at,
+                                    content_style});
+            }
+        }
 
         return Element{TextElement{
             .content = std::move(out),

@@ -37,6 +37,7 @@
 #include "spinner.hpp"   // shared Spinner<Dots> frame table (status_icon / footer)
 #include "../style/color.hpp"
 #include "../style/style.hpp"
+#include "../style/theme.hpp"
 
 #include "tool_body_preview.hpp"
 
@@ -255,33 +256,38 @@ private:
     //    terminal themes.
     [[nodiscard]] Element stats_row() const {
         using namespace dsl;
-        const Color sep_color   = Color::slot(ThemeSlot::Muted);   // ornamental dots
-        const Color count_color = Color::slot(ThemeSlot::Text);          // legible mid-gray
+        // One small chip per category: `● inspect 3`, dot and label in the
+        // category colour, count in text. Same single row as before.
+        const Color count_color = Color::slot(ThemeSlot::Text);
 
         std::vector<Element> parts;
-        parts.reserve(cfg_.stats.size() * 3);
+        parts.reserve(cfg_.stats.size() * 4);
         for (std::size_t i = 0; i < cfg_.stats.size(); ++i) {
             const auto& s = cfg_.stats[i];
-            if (i > 0)
-                parts.push_back(text("  \xc2\xb7  ", Style{}.with_fg(sep_color)));
-            parts.push_back(text(small_caps(s.label),
-                                 Style{}.with_fg(s.color).with_bold()));
+            if (i > 0) parts.push_back(text("   "));
+            parts.push_back(text("\xe2\x97\x8f ", Style{}.with_fg(s.color)));
+            parts.push_back(text(lower(s.label), Style{}.with_fg(s.color)));
             parts.push_back(text(" " + std::to_string(s.count),
-                                 Style{}.with_fg(count_color)));
+                                 Style{}.with_fg(count_color).with_bold()));
         }
         return (h(parts) | grow(1.0f)).build();
     }
 
-    // ── Footer row: `   ✓ DONE   3 actions   1.4s`. The DONE glyph +
-    //    label carry the status color; the summary uses ANSI 7 (legible
-    //    mid-gray) so the count + duration stays readable instead of
-    //    collapsing into background on dark themes.
+    static std::string lower(std::string_view s) {
+        std::string out{s};
+        for (auto& c : out)
+            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        return out;
+    }
+
+    // ── Footer row: `   ✓ done   3 actions   1.4s`. Glyph + word carry the
+    //    status colour; the summary stays in the text colour.
     [[nodiscard]] static Element footer_row(const AgentTimelineFooter& f) {
         using namespace dsl;
         return h(
             text("   "),
             text(f.glyph + " ", Style{}.with_fg(f.color).with_bold()),
-            text(small_caps(f.text), Style{}.with_fg(f.color).with_bold()),
+            text(lower(f.text), Style{}.with_fg(f.color).with_bold()),
             text("   "),
             text(f.summary, Style{}.with_fg(Color::slot(ThemeSlot::Text)))
         ).build();
@@ -429,9 +435,11 @@ private:
             text(" "),
             status_icon(ev.status, frame),
             text("  "),
-            text(ev.name, name_style(ev.status, ev.category_color, is_active)),
+            text(" " + ev.name + " ", chip_style(ev.status, ev.category_color))
+                | nowrap | shrink(0.0f),
             text("  "),
             text(ev.detail, detail_style(ev.category_color, is_active)) | clip
+                | shrink(1.0f)
             // NOTE: no per-event elapsed cell here. The duration of a
             // tool lives in the card's title-end (running tool / total)
             // and the DONE footer. A per-row right-aligned elapsed used
@@ -461,12 +469,19 @@ private:
             text("\xe2\x94\x82  ", stripe_st)
         ).build();
 
+        // Body rows sit on the canvas colour nudged a shade toward the text
+        // colour: same hue, just enough lift to read as a text display.
+        // Diff bands carry their own bg and win over it.
+        const Color panel = panel_bg();
         Element body_el = ToolBodyPreview{ev.body}.build();
         if (auto* bx = as_box(body_el)) {
             for (const auto& child : bx->children)
-                out.push_back((h(body_rule, child) | grow(1.0f)).build());
+                out.push_back((h(body_rule,
+                                 h(child) | bgc(panel) | grow(1.0f))
+                               | grow(1.0f)).build());
         } else if (auto* t = as_text(body_el); t && !t->content.empty()) {
-            out.push_back((h(body_rule, body_el) | grow(1.0f)).build());
+            out.push_back((h(body_rule, h(body_el) | bgc(panel) | grow(1.0f))
+                           | grow(1.0f)).build());
         }
     }
 
@@ -484,6 +499,39 @@ private:
             return Style{}.with_fg(Color::slot(ThemeSlot::Warning)).with_bold();
         return is_active ? Style{}.with_fg(cat).with_bold()
                          : Style{}.with_fg(cat).with_dim();
+    }
+
+    // A shade off the canvas: 6% of the way from background to text, so a
+    // dark theme gets a slightly lighter panel and a light theme a slightly
+    // darker one. Under theme::native the background is the terminal's and
+    // can't be measured, so no panel is painted there.
+    static Color panel_bg() {
+        const Theme& th = theme::live();
+        const auto bg = th.resolve(Color::slot(ThemeSlot::Background));
+        const auto fg = th.resolve(Color::slot(ThemeSlot::Text));
+        if (!bg.has_channels() || !fg.has_channels())
+            return Color::default_color();
+        auto step = [](int a, int b) {
+            return static_cast<uint8_t>(a + (b - a) * 6 / 100);
+        };
+        return Color::rgb(step(bg.r(), fg.r()), step(bg.g(), fg.g()),
+                          step(bg.b(), fg.b()));
+    }
+
+    // The tool name as a chip: bold ink on a solid fill of the tool's
+    // category colour (red when failed, yellow when rejected). A named
+    // scheme gets an explicit fill with the theme's inverse text; a palette
+    // colour (theme::native) can't be measured, so let the terminal swap
+    // its own fg/bg with SGR 7 instead.
+    static Style chip_style(AgentEventStatus s, Color cat) {
+        Color hue = cat;
+        if (s == AgentEventStatus::Failed)   hue = Color::slot(ThemeSlot::Error);
+        if (s == AgentEventStatus::Rejected) hue = Color::slot(ThemeSlot::Warning);
+        if (theme::live().resolve(hue).has_channels())
+            return Style{}.with_bg(hue)
+                          .with_fg(Color::slot(ThemeSlot::InverseText))
+                          .with_bold();
+        return Style{}.with_fg(hue).with_inverse().with_bold();
     }
 
     static Style detail_style(Color cat, bool /*is_active*/) {
