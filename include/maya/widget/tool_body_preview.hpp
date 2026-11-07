@@ -474,7 +474,38 @@ private:
     // the command failed (preserves the post-content failure cue).
     [[nodiscard]] Element bash_output_tail() const {
         using namespace dsl;
-        const auto p = elide(cfg_.text, /*head=*/0, cfg_.bash_tail);
+        // Lines that never tell you anything: bare separators and ctest's
+        // label timing footer. Dropped before the tail is taken, so the
+        // rows the card has go to real output.
+        std::string kept;
+        kept.reserve(cfg_.text.size());
+        {
+            std::string_view s = cfg_.text;
+            bool in_label_summary = false;
+            for (std::size_t p = 0; p <= s.size();) {
+                auto e = s.find('\n', p);
+                if (e == std::string_view::npos) e = s.size();
+                auto ln = s.substr(p, e - p);
+                auto t = ln;
+                while (!t.empty() && (t.front() == ' ' || t.front() == '\t')) t.remove_prefix(1);
+                while (!t.empty() && (t.back() == ' ' || t.back() == '\t')) t.remove_suffix(1);
+                const bool sep = !t.empty() && t.size() >= 3
+                    && t.find_first_not_of("-=_*~#") == std::string_view::npos;
+                if (t.starts_with("Label Time Summary:")) in_label_summary = true;
+                else if (t.empty()) in_label_summary = false;
+                const bool timing = in_label_summary || t.starts_with("Total Test time");
+                if (!sep && !timing) {
+                    kept.append(ln);
+                    kept += '\n';
+                }
+                if (e == s.size()) break;
+                p = e + 1;
+            }
+            while (!kept.empty() && (kept.back() == '\n' || kept.back() == ' ')) kept.pop_back();
+        }
+        const std::string_view text = kept.empty() ? std::string_view{cfg_.text}
+                                                   : std::string_view{kept};
+        const auto p = elide(text, /*head=*/0, cfg_.bash_tail);
 
         const Style marker_st = Style{}.with_fg(cfg_.chrome_color);
         const Style line_st   = Style{}.with_fg(cfg_.text_color);
@@ -569,6 +600,21 @@ private:
         using namespace dsl;
         std::optional<int> passed = count_before(cfg_.text, "tests passed");
         std::optional<int> failed = count_before(cfg_.text, "tests failed");
+        // ctest: `100% tests passed, 0 tests failed out of 6` or `100% tests
+        // passed out of 6`. The number before "tests passed" is a percent,
+        // so read the real counts from "out of N".
+        if (auto pct = cfg_.text.find("% tests passed"); pct != std::string_view::npos) {
+            if (auto oo = cfg_.text.find("out of ", pct); oo != std::string_view::npos) {
+                int total = 0; std::size_t k = oo + 7;
+                while (k < cfg_.text.size() && std::isdigit(static_cast<unsigned char>(cfg_.text[k])))
+                    total = total * 10 + (cfg_.text[k++] - '0');
+                if (total > 0) {
+                    const int f = failed.value_or(0);
+                    passed = total - f;
+                    failed = f;
+                }
+            }
+        }
 
         // TIER 2: bare-word shapes, gated on a runner context marker.
         if (!passed && !failed) {
@@ -592,6 +638,33 @@ private:
             }
         }
 
+        // ctest progress with no final summary (cut off or still running):
+        // tally the `N/T Test #k: name .... Passed|Failed` lines.
+        int progress_total = 0;
+        if (!passed && !failed) {
+            int ok = 0, bad = 0, total = 0;
+            const std::string_view b = cfg_.text;
+            for (std::size_t q = 0; q < b.size();) {
+                auto e = b.find('\n', q);
+                if (e == std::string_view::npos) e = b.size();
+                auto ln = b.substr(q, e - q);
+                q = e + 1;
+                const auto t = ln.find(" Test ");
+                const auto sl = ln.find('/');
+                if (t == std::string_view::npos || sl == std::string_view::npos || sl > t) continue;
+                if (ln.find("   Passed") != std::string_view::npos) ++ok;
+                else if (ln.find("***Failed") != std::string_view::npos
+                      || ln.find("   Failed") != std::string_view::npos) ++bad;
+                else continue;
+                int tt = 0;
+                for (std::size_t k = sl + 1; k < ln.size()
+                     && std::isdigit(static_cast<unsigned char>(ln[k])); ++k)
+                    tt = tt * 10 + (ln[k] - '0');
+                total = std::max(total, tt);
+            }
+            if (ok + bad >= 3) { passed = ok; failed = bad; progress_total = total; }
+        }
+
         if (!passed && !failed) return std::nullopt;
 
         const int p = passed.value_or(0);
@@ -607,7 +680,20 @@ private:
         const Style bad_st = Style{}.with_fg(danger()).with_bold();
         const Style txt_st = Style{}.with_fg(cfg_.text_color);
 
-        if (f == 0) {
+        if (progress_total > total) {
+            // Partial run: say how far it got.
+            if (f == 0)
+                std::snprintf(buf, sizeof(buf), "\xe2\x9c\x93 %d passed so far (%d of %d run)",
+                              p, total, progress_total);
+            else
+                std::snprintf(buf, sizeof(buf), "\xe2\x9c\x97 %d failed so far (%d of %d run)",
+                              f, total, progress_total);
+            const std::string s{buf};
+            const std::size_t glyph_len = 4;
+            runs.push_back({0, glyph_len, f == 0 ? ok_st : bad_st});
+            runs.push_back({glyph_len, s.size() - glyph_len, txt_st});
+            content = s;
+        } else if (f == 0) {
             std::snprintf(buf, sizeof(buf), "\xe2\x9c\x93 %d/%d tests passed", p, total);
             const std::string s{buf};
             // Glyph + space = 4 bytes UTF-8 + ' '
@@ -702,15 +788,28 @@ private:
         header += glyph;
 
         const std::size_t txt_off = header.size();
+        const int n_warn = static_cast<int>(std::count_if(
+            diags.begin(), diags.end(),
+            [](const Diag& d) { return d.severity == Diag::Warning; }));
+        // `2 errors, 1 warning in src/pty.c` / `… across 3 files`
+        auto plural = [](int n, const char* w) {
+            return std::to_string(n) + " " + w + (n == 1 ? "" : "s");
+        };
+        if (n_err > 0) header += plural(n_err, "error");
+        if (n_warn > 0) header += (n_err > 0 ? ", " : "") + plural(n_warn, "warning");
+        if (n_err == 0 && n_warn == 0) header += plural(n_total, "note");
         if (single_file) {
-            header += std::to_string(n_err > 0 ? n_err : n_total);
-            header += (n_err == 1 || n_total == 1) ? " issue in "
-                                                   : " issues in ";
+            header += " in ";
             header += diags[0].path;
         } else {
-            header += std::to_string(n_total);
-            header += (n_total == 1) ? " issue across files"
-                                     : " issues across files";
+            int files = 0;
+            for (std::size_t i = 0; i < diags.size(); ++i) {
+                bool dup = false;
+                for (std::size_t j = 0; j < i; ++j)
+                    if (diags[j].path == diags[i].path) { dup = true; break; }
+                files += !dup;
+            }
+            header += " across " + plural(files, "file");
         }
         hdr_runs.push_back({txt_off, header.size() - txt_off, hdr_txt_st});
 
@@ -731,16 +830,23 @@ private:
             char coord[24];
             if (d.col > 0) std::snprintf(coord, sizeof(coord), "%d:%d", d.line, d.col);
             else           std::snprintf(coord, sizeof(coord), "%d",    d.line);
+            // Across files a bare 271:5 can't be found; name the file.
+            std::string where = single_file ? std::string{coord}
+                : std::string{std::string_view{d.path}.substr(d.path.rfind('/') + 1)}
+                      + ":" + coord;
             std::string row;
             std::vector<StyledRun> rrun;
             row += "    ";
             const std::size_t coff = row.size();
-            row += coord;
-            rrun.push_back({coff, std::string{coord}.size(), coord_st});
+            row += where;
+            rrun.push_back({coff, where.size(), coord_st});
             row += "  ";
             const std::size_t moff = row.size();
             row += d.msg;
-            rrun.push_back({moff, d.msg.size(), msg_st});
+            rrun.push_back({moff, d.msg.size(),
+                            d.severity == Diag::Warning
+                                ? Style{}.with_fg(Color::slot(ThemeSlot::Warning))
+                                : msg_st});
             rows.push_back(Element{TextElement{
                 .content = std::move(row),
                 .style   = {},
@@ -873,7 +979,21 @@ private:
             const auto nl = body.find('\n', pos);
             const std::string_view ln = body.substr(
                 pos, (nl == std::string_view::npos ? body.size() : nl) - pos);
-            if (auto d = parse_diag_line(ln)) out.push_back(std::move(*d));
+            if (auto d = parse_diag_line(ln)) {
+                // `../src/a.c` and `src/a.c` are the same file to a reader.
+                while (!d->path.empty() && (d->path.front() == ' ' || d->path.front() == '\t'))
+                    d->path.erase(0, 1);
+                while (d->path.starts_with("../") || d->path.starts_with("./"))
+                    d->path.erase(0, d->path.starts_with("../") ? 3 : 2);
+                // Build tools print each error twice (a summary, then the
+                // full log); count and show each location once.
+                const bool seen = std::any_of(out.begin(), out.end(), [&](const Diag& o) {
+                    return o.line == d->line && o.col == d->col && o.msg == d->msg
+                        && (o.path == d->path || o.path.ends_with("/" + d->path)
+                            || d->path.ends_with("/" + o.path));
+                });
+                if (!seen) out.push_back(std::move(*d));
+            }
             if (nl == std::string_view::npos) break;
             pos = nl + 1;
         }
@@ -1360,6 +1480,16 @@ private:
                 || c == '>' || c == '[' || c == ']';
         };
         std::size_t i = 0;
+        // A leading git status word (from the git_status card).
+        for (auto [w, slot] : {std::pair{std::string_view{"modified "}, ThemeSlot::Warning},
+                               {"new ", ThemeSlot::Success}, {"added ", ThemeSlot::Success},
+                               {"deleted ", ThemeSlot::Error}, {"renamed ", ThemeSlot::Info},
+                               {"conflict ", ThemeSlot::Error}})
+            if (s.starts_with(w)) {
+                out.push_back({0, w.size() - 1, Style{}.with_fg(Color::slot(slot)).with_bold()});
+                i = w.size();
+                break;
+            }
         while (i < n) {
             const char c = s[i];
             const bool at_word = i == 0 || !word(s[i - 1]);
