@@ -487,19 +487,18 @@ public:
                 const std::size_t cur_pos =
                     cursor_here ? cur_u - line_off : std::string_view::npos;
                 if (!cursor_here) {
-                    body_rows.push_back(h(
-                        prefix,
-                        text(std::string{line}, text_style)
-                    ).build());
+                    TextElement te;
+                    te.content = std::string{line};
+                    te.style   = text_style;
+                    te.wrap    = TextWrap::Wrap;
+                    te.runs    = token_runs(line, 0, line.size(), line_off, text_style);
+                    body_rows.push_back(h(prefix, Element{std::move(te)}).build());
                 } else {
                     TextElement te;
                     te.content = std::string{line};
                     te.style   = text_style;
                     te.wrap    = TextWrap::Wrap;
-                    te.runs.push_back(StyledRun{
-                        .byte_offset = 0,
-                        .byte_length = cur_pos,
-                        .style       = text_style});
+                    te.runs = token_runs(line, 0, cur_pos, line_off, text_style);
                     te.runs.push_back(StyledRun{
                         .byte_offset = cur_pos,
                         .byte_length = kBlock.size(),
@@ -507,10 +506,9 @@ public:
                                            ? cursor_hw
                                            : blink_off ? cursor_hidden
                                                        : cursor_visible});
-                    te.runs.push_back(StyledRun{
-                        .byte_offset = cur_pos + kBlock.size(),
-                        .byte_length = line.size() - cur_pos - kBlock.size(),
-                        .style       = text_style});
+                    for (auto& r : token_runs(line, cur_pos + kBlock.size(),
+                                              line.size(), line_off, text_style))
+                        te.runs.push_back(r);
                     body_rows.push_back(h(prefix, Element{std::move(te)}).build());
                 }
             }
@@ -622,14 +620,18 @@ public:
                     return measure_element(el, w > 0 ? w : 1).width.value;
                 };
 
-                // The profile chip — the must-keep right anchor.
+                // The profile chip — the must-keep right anchor. A solid
+                // chip, same idiom as the tool cards' name chips.
                 std::vector<Element> chip_parts;
-                chip_parts.push_back(text("\xe2\x96\x8e",
-                    Style{}.with_fg(ri.profile_color)));
-                chip_parts.push_back(text(" "));
-                chip_parts.push_back(text(
-                    small_caps_(ri.profile_label),
-                    Style{}.with_fg(ri.profile_color).with_bold()));
+                Style chip_st = Style{}.with_fg(ri.profile_color).with_inverse().with_bold();
+                if (theme::live().resolve(ri.profile_color).has_channels())
+                    chip_st = Style{}.with_bg(ri.profile_color)
+                                     .with_fg(Color::slot(ThemeSlot::InverseText))
+                                     .with_bold();
+                std::string label{ri.profile_label};
+                for (auto& c : label)
+                    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+                chip_parts.push_back(text(" " + label + " ", chip_st));
                 Element chip = h(std::move(chip_parts)).build();
                 const int chip_cols = width_of(chip);
 
@@ -783,6 +785,44 @@ public:
     }
 
 private:
+    // Runs for bytes [a, b) of one composer line: `@path` mentions in the
+    // link colour, and a `/command` at the very start of the message in
+    // bold accent. Colour only — no bytes change, so wrap and caret hold.
+    // `line_off` is the line's offset in the whole buffer (a /command only
+    // counts on the first line).
+    std::vector<StyledRun> token_runs(std::string_view line, std::size_t a,
+                                      std::size_t b, std::size_t line_off,
+                                      Style base) const {
+        std::vector<StyledRun> out;
+        if (b <= a) return out;
+        const Style mention_st = Style{}.with_fg(Color::slot(ThemeSlot::Link));
+        const Style cmd_st     = Style{}.with_fg(cfg_sp_->accent_color).with_bold();
+        auto ws = [](char c) { return c == ' ' || c == '\t'; };
+        std::size_t at = a, i = a;
+        auto flush = [&](std::size_t to) {
+            if (to > at) out.push_back({at, to - at, base});
+            at = to;
+        };
+        while (i < b) {
+            const bool word_start = i == 0 || ws(line[i - 1]);
+            const bool cmd  = word_start && i == 0 && line_off == 0 && line[i] == '/';
+            const bool ment = word_start && line[i] == '@';
+            if ((cmd || ment) && i + 1 < line.size() && !ws(line[i + 1])) {
+                std::size_t e = i + 1;
+                while (e < line.size() && !ws(line[e])) ++e;
+                // The caret block can sit inside a token; split around it.
+                e = std::min(e, b);
+                flush(i);
+                out.push_back({i, e - i, cmd ? cmd_st : mention_st});
+                at = i = e;
+                continue;
+            }
+            ++i;
+        }
+        flush(b);
+        return out;
+    }
+
     std::shared_ptr<const Config> cfg_sp_;
 
     // Rebuild-from-shared constructor used by the cached render closure —
