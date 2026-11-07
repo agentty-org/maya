@@ -484,10 +484,9 @@ private:
             text("\xe2\x94\x82  ", stripe_st)
         ).build();
 
-        // Body rows sit on the canvas colour nudged a shade toward the text
-        // colour: same hue, just enough lift to read as a text display.
-        // Diff bands carry their own bg and win over it.
-        const Color panel = panel_bg();
+        // Body rows sit on a panel a shade off the canvas, faintly tinted
+        // with the row's hue. Diff bands carry their own bg and win over it.
+        const Color panel = panel_bg(ev.status, ev.category_color);
         Element body_el = ToolBodyPreview{ev.body}.build();
         if (auto* bx = as_box(body_el)) {
             for (const auto& child : bx->children)
@@ -516,21 +515,26 @@ private:
                          : Style{}.with_fg(cat).with_dim();
     }
 
-    // A shade off the canvas: 6% of the way from background to text, so a
-    // dark theme gets a slightly lighter panel and a light theme a slightly
-    // darker one. Under theme::native the background is the terminal's and
-    // can't be measured, so no panel is painted there.
-    static Color panel_bg() {
+    // The body panel: a shade off the canvas (6% toward the text colour, so
+    // dark themes lift and light themes dip), then 5% toward the row's hue
+    // so the body is a faint sibling of the header band. Under theme::native
+    // the colours can't be measured, so no panel is painted there.
+    static Color panel_bg(AgentEventStatus s, Color cat) {
         const Theme& th = theme::live();
         const auto bg = th.resolve(Color::slot(ThemeSlot::Background));
         const auto fg = th.resolve(Color::slot(ThemeSlot::Text));
         if (!bg.has_channels() || !fg.has_channels())
             return Color::default_color();
-        auto step = [](int a, int b) {
-            return static_cast<uint8_t>(a + (b - a) * 6 / 100);
+        auto step = [](int a, int b, int pct) {
+            return a + (b - a) * pct / 100;
         };
-        return Color::rgb(step(bg.r(), fg.r()), step(bg.g(), fg.g()),
-                          step(bg.b(), fg.b()));
+        int r = step(bg.r(), fg.r(), 6), g = step(bg.g(), fg.g(), 6),
+            b = step(bg.b(), fg.b(), 6);
+        if (const auto hc = th.resolve(chip_hue(s, cat)); hc.has_channels()) {
+            r = step(r, hc.r(), 5); g = step(g, hc.g(), 5); b = step(b, hc.b(), 5);
+        }
+        return Color::rgb(static_cast<uint8_t>(r), static_cast<uint8_t>(g),
+                          static_cast<uint8_t>(b));
     }
 
     // The hue a row is drawn in: its category, red when failed, yellow when
