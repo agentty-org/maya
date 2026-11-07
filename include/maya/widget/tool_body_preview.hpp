@@ -137,6 +137,11 @@ public:
         // coloured with it. Empty = flat colour, as before.
         std::string lang;
 
+        // Command / tool output: colour the parts worth spotting (numbers,
+        // paths, URLs, quoted strings, hashes, flags, ✓ ✗) with the
+        // theme's named colours, so it reads well even under native.
+        bool colorize = false;
+
         // The literal text a search was LOOKING FOR, highlighted in place
         // wherever it appears in a GrepMatches body.
         //
@@ -1325,6 +1330,119 @@ private:
 
     // ── Syntax colouring for code rows ───────────────────────────────────────
     using LineRuns = std::vector<std::vector<StyledRun>>;
+
+    // Colour spans for one line of command / tool output. Only the theme's
+    // named colours, so native reads as well as a scheme: URLs and paths
+    // in link, numbers in warning, quoted strings in success, git hashes in
+    // accent, --flags in info, key= / key: labels in primary, ✓ / ✗ in
+    // success / error.
+    [[nodiscard]] static std::vector<StyledRun> output_tokens(std::string_view s) {
+        std::vector<StyledRun> out;
+        const Style url_st  = Style{}.with_fg(Color::slot(ThemeSlot::Link)).with_underline();
+        const Style path_st = Style{}.with_fg(Color::slot(ThemeSlot::Link));
+        const Style num_st  = Style{}.with_fg(Color::slot(ThemeSlot::Warning));
+        const Style str_st  = Style{}.with_fg(Color::slot(ThemeSlot::Success));
+        const Style hash_st = Style{}.with_fg(Color::slot(ThemeSlot::Accent));
+        const Style flag_st = Style{}.with_fg(Color::slot(ThemeSlot::Info));
+        const Style key_st  = Style{}.with_fg(Color::slot(ThemeSlot::Primary));
+        const Style ok_st   = Style{}.with_fg(Color::slot(ThemeSlot::Success)).with_bold();
+        const Style bad_st  = Style{}.with_fg(Color::slot(ThemeSlot::Error)).with_bold();
+        const std::size_t n = s.size();
+        auto word = [](char c) {
+            return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+        };
+        auto hex = [](char c) {
+            return std::isdigit(static_cast<unsigned char>(c)) || (c >= 'a' && c <= 'f');
+        };
+        auto stop = [](char c) {
+            return c == ' ' || c == '\t' || c == '"' || c == '\'' || c == '`'
+                || c == ',' || c == ';' || c == ')' || c == '(' || c == '<'
+                || c == '>' || c == '[' || c == ']';
+        };
+        std::size_t i = 0;
+        while (i < n) {
+            const char c = s[i];
+            const bool at_word = i == 0 || !word(s[i - 1]);
+            if (s.compare(i, 3, "\xe2\x9c\x93") == 0 || s.compare(i, 3, "\xe2\x9c\x94") == 0) {
+                out.push_back({i, 3, ok_st}); i += 3; continue;
+            }
+            if (s.compare(i, 3, "\xe2\x9c\x97") == 0 || s.compare(i, 3, "\xe2\x9c\x98") == 0) {
+                out.push_back({i, 3, bad_st}); i += 3; continue;
+            }
+            if (at_word && (s.compare(i, 7, "http://") == 0 || s.compare(i, 8, "https://") == 0)) {
+                std::size_t j = i;
+                while (j < n && !stop(s[j])) ++j;
+                out.push_back({i, j - i, url_st}); i = j; continue;
+            }
+            if (c == '"' || (c == '\'' && at_word)) {
+                const auto e = s.find(c, i + 1);
+                if (e != std::string_view::npos && e - i <= 120) {
+                    out.push_back({i, e - i + 1, str_st}); i = e + 1; continue;
+                }
+            }
+            // Absolute or ./ ~/ ../ path.
+            if (at_word && (c == '/' || c == '~' || c == '.')) {
+                std::size_t j = i;
+                while (j < n && !stop(s[j]) && s[j] != ':') ++j;
+                const auto tok = s.substr(i, j - i);
+                const bool ok = tok.find('/') != std::string_view::npos
+                    && (c == '/' ? tok.size() > 1
+                                 : tok.starts_with("~/") || tok.starts_with("./")
+                                   || tok.starts_with("../"));
+                if (ok) { out.push_back({i, j - i, path_st}); i = j; continue; }
+            }
+            if (at_word && word(c)) {
+                std::size_t j = i;
+                while (j < n && (word(s[j]) || s[j] == '.' || s[j] == '/' || s[j] == '-')) ++j;
+                const auto tok = s.substr(i, j - i);
+                // Relative path like src/a.cpp.
+                if (tok.find('/') != std::string_view::npos && tok.back() != '/') {
+                    out.push_back({i, j - i, path_st}); i = j; continue;
+                }
+                // Git hash: 7-40 lowercase hex with both a letter and a digit.
+                std::size_t k = i;
+                while (k < n && hex(s[k])) ++k;
+                if (k - i >= 7 && k - i <= 40 && (k == n || !word(s[k]))) {
+                    const auto h = s.substr(i, k - i);
+                    if (h.find_first_of("abcdef") != std::string_view::npos
+                        && h.find_first_of("0123456789") != std::string_view::npos) {
+                        out.push_back({i, k - i, hash_st}); i = k; continue;
+                    }
+                }
+                // Number with an optional short unit: 42, 3.5s, 120ms, 8KB, 97%.
+                if (std::isdigit(static_cast<unsigned char>(c))) {
+                    std::size_t m = i;
+                    while (m < n && (std::isdigit(static_cast<unsigned char>(s[m]))
+                                     || s[m] == '.' || s[m] == ',')) ++m;
+                    while (m > i && (s[m - 1] == '.' || s[m - 1] == ',')) --m;
+                    std::size_t u = m;
+                    while (u < n && std::isalpha(static_cast<unsigned char>(s[u])) && u - m < 3) ++u;
+                    if (u < n && s[u] == '%') ++u;
+                    if (u == n || !word(s[u])) {
+                        out.push_back({i, u - i, num_st}); i = u; continue;
+                    }
+                }
+                // key= or `key: ` label before a value.
+                std::size_t w = i;
+                while (w < n && (word(s[w]) || s[w] == '-')) ++w;
+                if (w - i <= 24 && w < n
+                    && (s[w] == '=' || (s[w] == ':' && w + 1 < n && s[w + 1] == ' '))) {
+                    out.push_back({i, w - i, key_st}); i = w; continue;
+                }
+                i = w > i ? w : i + 1;
+                continue;
+            }
+            // --flag / -f after a space.
+            if (c == '-' && (i == 0 || s[i - 1] == ' ') && i + 1 < n
+                && (s[i + 1] == '-' || std::isalpha(static_cast<unsigned char>(s[i + 1])))) {
+                std::size_t j = i + 1;
+                while (j < n && (word(s[j]) || s[j] == '-')) ++j;
+                if (j - i >= 2) { out.push_back({i, j - i, flag_st}); i = j; continue; }
+            }
+            ++i;
+        }
+        return out;
+    }
 
     // A path's extension, lowercased ("cpp" for src/a.cpp), or empty.
     [[nodiscard]] static std::string ext_of(std::string_view path) {
@@ -2582,6 +2700,22 @@ private:
             runs.push_back({marker_off, marker.size(), marker_style});
         runs.push_back({pipe_off, 5, pipe_style});
         if (!content.empty()) {
+            // Output colouring first (when on), the search needle on top.
+            if (cfg_.colorize && content_style.fg) {
+                const auto toks = output_tokens(content);
+                Style hit_style = Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_bold();
+                if (auto b = search_bg()) hit_style = hit_style.with_bg(*b);
+                for (auto r : paint_runs(content, content_style, hit_style, &toks)) {
+                    r.byte_offset += content_off;
+                    runs.push_back(r);
+                }
+                return Element{TextElement{
+                    .content = std::move(out),
+                    .style   = {},
+                    .wrap    = TextWrap::TruncateEnd,
+                    .runs    = std::move(runs),
+                }};
+            }
             // Light up the searched-for literal wherever it appears in the
             // row. Falls back to one flat run when there's no needle.
             const auto spans = needle_spans(content);
