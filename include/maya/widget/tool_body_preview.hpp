@@ -1378,7 +1378,7 @@ private:
             const std::size_t d0 = out.size();
             out += "\xe2\x97\x8f ";
             runs.push_back({d0, 3, Style{}.with_fg(
-                readable_on(*lc, Color::slot(ThemeSlot::Background), 3.0))});
+                readable_on(*lc, Color::slot(ThemeSlot::Background), 3.5))});
         }
         const auto slash = path.find_last_of('/');
         const std::size_t cut = slash == std::string_view::npos ? 0 : slash + 1;
@@ -1399,8 +1399,8 @@ private:
     // color.hpp), resolving theme slots against the live theme first.
     static Color readable_on(Color fg, Color bg, double target) {
         const auto& th = theme::live();
-        const auto f = th.resolve(fg);
-        const auto b = th.resolve(bg);
+        const auto f = theme::measure(th.resolve(fg));
+        const auto b = theme::measure(th.resolve(bg), true);
         if (!f.has_channels() || !b.has_channels()) return fg;
         return maya::readable_on(f, b, target);
     }
@@ -1455,8 +1455,8 @@ private:
     // under native, where it can't be mixed; the hit is then bold only.
     [[nodiscard]] static std::optional<Color> search_bg() {
         const Theme& th = theme::live();
-        const auto w  = th.resolve(Color::slot(ThemeSlot::Warning));
-        const auto bg = th.resolve(Color::slot(ThemeSlot::Background));
+        const auto w  = theme::measure(th.resolve(Color::slot(ThemeSlot::Warning)));
+        const auto bg = theme::measure(th.resolve(Color::slot(ThemeSlot::Background)), true);
         if (!w.has_channels() || !bg.has_channels()) return std::nullopt;
         auto mix = [](int a, int b) { return static_cast<uint8_t>(a + (b - a) * 30 / 100); };
         return Color::rgb(mix(bg.r(), w.r()), mix(bg.g(), w.g()), mix(bg.b(), w.b()));

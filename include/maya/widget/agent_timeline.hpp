@@ -448,7 +448,10 @@ private:
             : (h(text("  "), h(std::move(detail_el)) | shrink(1.0f))
                    | shrink(1.0f)).build();
         out.push_back((h(
-            text(glyph, tree_style(ev.category_color, is_active)),
+            // The status icon leads the row on its own. The old `──` /
+            // `├─` branch said nothing the rail and chip didn't already
+            // say; its columns stay so body rows keep their alignment.
+            text("  "),
             text(" "),
             status_icon(ev.status, frame),
             text("  "),
@@ -521,8 +524,8 @@ private:
     // the colours can't be measured, so no panel is painted there.
     static Color panel_bg(AgentEventStatus s, Color cat) {
         const Theme& th = theme::live();
-        const auto bg = th.resolve(Color::slot(ThemeSlot::Background));
-        const auto fg = th.resolve(Color::slot(ThemeSlot::Text));
+        const auto bg = theme::measure(th.resolve(Color::slot(ThemeSlot::Background)), true);
+        const auto fg = theme::measure(th.resolve(Color::slot(ThemeSlot::Text)));
         if (!bg.has_channels() || !fg.has_channels())
             return Color::default_color();
         auto step = [](int a, int b, int pct) {
@@ -530,7 +533,7 @@ private:
         };
         int r = step(bg.r(), fg.r(), 6), g = step(bg.g(), fg.g(), 6),
             b = step(bg.b(), fg.b(), 6);
-        if (const auto hc = th.resolve(chip_hue(s, cat)); hc.has_channels()) {
+        if (const auto hc = theme::measure(th.resolve(chip_hue(s, cat))); hc.has_channels()) {
             r = step(r, hc.r(), 5); g = step(g, hc.g(), 5); b = step(b, hc.b(), 5);
         }
         return Color::rgb(static_cast<uint8_t>(r), static_cast<uint8_t>(g),
@@ -551,8 +554,8 @@ private:
     // theme, paler) sibling. nullopt when either colour can't be measured.
     static std::optional<Color> band_bg(AgentEventStatus s, Color cat) {
         const Theme& th = theme::live();
-        const auto hc = th.resolve(chip_hue(s, cat));
-        const auto bg = th.resolve(Color::slot(ThemeSlot::Background));
+        const auto hc = theme::measure(th.resolve(chip_hue(s, cat)));
+        const auto bg = theme::measure(th.resolve(Color::slot(ThemeSlot::Background)), true);
         if (!hc.has_channels() || !bg.has_channels()) return std::nullopt;
         auto mix = [](int a, int b) {
             return static_cast<uint8_t>(a + (b - a) * 22 / 100);

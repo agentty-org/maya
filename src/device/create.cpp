@@ -1,6 +1,12 @@
 // src/device/create.cpp — take the terminal: raw mode, screen, probes.
 #include "internal.hpp"
 
+#include <cctype>
+#include <optional>
+
+#include "maya/render/canvas.hpp"   // terminal_color_level
+#include "maya/style/theme.hpp"     // set_terminal_colors
+
 namespace maya::detail {
 
 auto Device::create(Options cfg) -> Result<Device> {
@@ -209,10 +215,21 @@ auto Device::create(Options cfg) -> Result<Device> {
     // frame.
     const bool want_cpr  = cfg.mouse && rt.inline_terminal_;
     const bool want_5522 = !ansi::tmux_in_path();
-    if (want_cpr || want_5522) {
+    // OSC 10/11/4: the terminal's own foreground, background and 16-colour
+    // palette. Asked in the same write, so it costs no extra round-trip.
+    // Native colours can then be measured, which is what tinted bands and
+    // panels need. Truecolor only: on a 256/16-colour terminal a mixed tint
+    // would be crushed to the nearest palette entry and look worse.
+    const bool want_colors = terminal_color_level() >= 3;
+    if (want_cpr || want_5522 || want_colors) {
         std::string ask;
         if (want_cpr)  ask += "\x1b[6n";
         if (want_5522) ask += "\x1b[?5522$p";
+        if (want_colors) {
+            ask += "\x1b]10;?\x1b\\\x1b]11;?\x1b\\";
+            for (int k = 0; k < 16; ++k)
+                ask += "\x1b]4;" + std::to_string(k) + ";?\x1b\\";
+        }
         ask += "\x1b[c";   // DA1 fence: every terminal answers, last
         (void)platform::io_write_all(output_h, ask);
 
@@ -272,11 +289,55 @@ auto Device::create(Options cfg) -> Result<Device> {
             }
             return {};
         };
+        // `OSC 1x ; rgb:RRRR/GGGG/BBBB ST` → colour (erased). Accepts 1-4 hex
+        // digits per channel and either ST or BEL as the terminator.
+        auto take_osc_color = [](std::string& buf, int which,
+                                 int sub = -1) -> std::optional<LitColor> {
+            const std::string pre = "\x1b]" + std::to_string(which)
+                + (sub >= 0 ? ";" + std::to_string(sub) : std::string{}) + ";rgb:";
+            auto i = buf.find(pre);
+            if (i == std::string::npos) return std::nullopt;
+            std::size_t j = i + pre.size();
+            int ch[3] = {0, 0, 0};
+            for (int c = 0; c < 3; ++c) {
+                int v = 0, n = 0;
+                while (j < buf.size() && std::isxdigit(static_cast<unsigned char>(buf[j]))) {
+                    const char x = buf[j++];
+                    v = v * 16 + (std::isdigit(static_cast<unsigned char>(x))
+                                      ? x - '0' : (std::tolower(x) - 'a' + 10));
+                    ++n;
+                }
+                if (n == 0) return std::nullopt;
+                // Scale an n-digit hex value to 8 bits.
+                const int max = (1 << (4 * n)) - 1;
+                ch[c] = (v * 255 + max / 2) / max;
+                if (c < 2) {
+                    if (j >= buf.size() || buf[j] != '/') return std::nullopt;
+                    ++j;
+                }
+            }
+            std::size_t end = j;
+            if (end < buf.size() && buf[end] == '\x07') ++end;
+            else if (end + 1 < buf.size() && buf[end] == '\x1b' && buf[end + 1] == '\\') end += 2;
+            else return std::nullopt;   // incomplete
+            buf.erase(i, end - i);
+            return LitColor::rgb(static_cast<uint8_t>(ch[0]), static_cast<uint8_t>(ch[1]),
+                                 static_cast<uint8_t>(ch[2]));
+        };
         // The deadline is only a safety net for a pty that answers nothing.
         const auto deadline = std::chrono::steady_clock::now()
                             + std::chrono::milliseconds(150);
         std::string resp;
         int row = 0, ps = -1;
+        std::optional<LitColor> term_fg, term_bg;
+        std::optional<LitColor> term_pal[16];
+        auto take_colors = [&] {
+            if (!want_colors) return;
+            if (!term_fg) term_fg = take_osc_color(resp, 10);
+            if (!term_bg) term_bg = take_osc_color(resp, 11);
+            for (int k = 0; k < 16; ++k)
+                if (!term_pal[k]) term_pal[k] = take_osc_color(resp, 4, k);
+        };
         bool fenced = false;
         while (std::chrono::steady_clock::now() < deadline) {
             auto data = read_raw();
@@ -284,6 +345,7 @@ auto Device::create(Options cfg) -> Result<Device> {
                 resp += data;
                 if (want_cpr && row == 0) row = take_cpr(resp);
                 if (want_5522 && ps < 0)  ps = take_rpm(resp);
+                take_colors();
                 // DA1 is answered last: once it's here, so is the rest.
                 if (take_da1(resp)) { fenced = true; break; }
             } else {
@@ -294,7 +356,11 @@ auto Device::create(Options cfg) -> Result<Device> {
         if (fenced) {   // a reply split across reads before the fence
             if (want_cpr && row == 0) row = take_cpr(resp);
             if (want_5522 && ps < 0)  ps = take_rpm(resp);
+            take_colors();
         }
+        if (term_fg && term_bg) theme::set_terminal_colors(*term_fg, *term_bg);
+        for (int k = 0; k < 16; ++k)
+            if (term_pal[k]) theme::set_terminal_palette(k, *term_pal[k]);
         if (row > 0) rt.inline_top_row_ = row;
         if (ps >= 0)
             rt.osc5522_support_ = (ps >= 1 && ps <= 4)

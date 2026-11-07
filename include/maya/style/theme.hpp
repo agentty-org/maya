@@ -532,6 +532,57 @@ inline void set_live(Theme&& t) noexcept { set_live(static_cast<const Theme&>(t)
 }
 
 // ============================================================================
+// Terminal colours — what the terminal itself reported at startup
+// ============================================================================
+// theme::native states no RGB: text and background are "the terminal's
+// default" and hues are ANSI palette entries, so nothing can be mixed from
+// them (tinted bands, panels, match highlights). At startup maya asks the
+// terminal for its foreground, background and 16-colour palette (OSC 10,
+// 11, 4) in the same round-trip it already makes. When the terminal
+// answers, measure() turns those into real RGB; when it doesn't, measure()
+// stays honest and returns the colour unmeasured.
+struct TerminalColors {
+    bool     have_fgbg = false;
+    LitColor fg = LitColor::rgb(0, 0, 0), bg = LitColor::rgb(0, 0, 0);
+    std::uint16_t have_palette = 0;           // bit i = palette[i] known
+    LitColor palette[16]{};
+};
+namespace detail {
+inline TerminalColors& terminal_colors_slot() noexcept {
+    static TerminalColors tc;
+    return tc;
+}
+}  // namespace detail
+
+// Set once at startup, from the device's probe, before the first frame.
+inline void set_terminal_colors(LitColor fg, LitColor bg) noexcept {
+    auto& tc = detail::terminal_colors_slot();
+    tc.fg = fg; tc.bg = bg; tc.have_fgbg = true;
+}
+inline void set_terminal_palette(int index, LitColor rgb) noexcept {
+    if (index < 0 || index > 15) return;
+    auto& tc = detail::terminal_colors_slot();
+    tc.palette[index] = rgb;
+    tc.have_palette = static_cast<std::uint16_t>(tc.have_palette | (1u << index));
+}
+[[nodiscard]] inline const TerminalColors& terminal_colors() noexcept {
+    return detail::terminal_colors_slot();
+}
+
+// `c` as real RGB, or `c` unchanged when that isn't known. `as_bg` picks
+// which default a Default colour means (the canvas or the ink).
+[[nodiscard]] inline LitColor measure(LitColor c, bool as_bg = false) noexcept {
+    if (c.has_channels()) return c;
+    const auto& tc = terminal_colors();
+    if (c.kind() == ColorKind::Default)
+        return tc.have_fgbg ? (as_bg ? tc.bg : tc.fg) : c;
+    if (c.kind() == ColorKind::Named && c.index() < 16
+        && (tc.have_palette & (1u << c.index())))
+        return tc.palette[c.index()];
+    return c;
+}
+
+// ============================================================================
 // with_contrast_floor — lift a scheme's ink slots until they read
 // ============================================================================
 // Measured across the 615 bundled schemes: `primary`, `accent` and `error`
@@ -542,7 +593,8 @@ inline void set_live(Theme&& t) noexcept { set_live(static_cast<const Theme&>(t)
 //
 // This returns `t` with each ink slot moved in LIGHTNESS only (hue and
 // saturation kept) until it reaches the floor against `background`: 4.5:1
-// for the hue slots, 3:1 for the deliberately quiet ones. A slot that
+// for the hue slots, 3.5:1 for the deliberately quiet ones (3:1 plus room
+// for the tinted tool panel, which sits a shade off the background). A slot that
 // already reads is untouched, and so is any slot or background that isn't
 // an RGB colour (theme::native states none, so it comes back unchanged).
 // Backgrounds, bands and the chip ink are not ink-on-canvas, so they are
@@ -618,7 +670,7 @@ namespace detail {
 
 [[nodiscard]] inline Theme with_contrast_floor(const Theme& t,
                                                double ink   = 4.5,
-                                               double quiet = 3.0) noexcept {
+                                               double quiet = 3.5) noexcept {
     Theme out = t;
     const LitColor bg = t.background;
     if (!bg.has_channels()) return out;
