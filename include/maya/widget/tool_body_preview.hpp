@@ -1384,71 +1384,14 @@ private:
         }};
     }
 
-    // WCAG relative luminance / contrast ratio.
-    static double rel_lum(int r, int g, int b) {
-        auto f = [](int v) {
-            const double s = v / 255.0;
-            return s <= 0.03928 ? s / 12.92 : std::pow((s + 0.055) / 1.055, 2.4);
-        };
-        return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
-    }
-
-    // `fg` adjusted so it reaches `target` contrast on `bg`: same hue and
-    // saturation, lightness moved away from the background (up on dark,
-    // down on light). Unchanged when it already reads, or when either
-    // colour is a palette entry we can't measure.
+    // `fg` adjusted to reach `target` contrast on `bg` (see readable_on in
+    // color.hpp), resolving theme slots against the live theme first.
     static Color readable_on(Color fg, Color bg, double target) {
         const auto& th = theme::live();
         const auto f = th.resolve(fg);
         const auto b = th.resolve(bg);
         if (!f.has_channels() || !b.has_channels()) return fg;
-        const double lb = rel_lum(b.r(), b.g(), b.b());
-        auto ratio = [&](double lf) {
-            return lf > lb ? (lf + 0.05) / (lb + 0.05) : (lb + 0.05) / (lf + 0.05);
-        };
-        if (ratio(rel_lum(f.r(), f.g(), f.b())) >= target) return fg;
-
-        // rgb -> hsl
-        const double r = f.r() / 255.0, g = f.g() / 255.0, bl = f.b() / 255.0;
-        const double mx = std::max({r, g, bl}), mn = std::min({r, g, bl});
-        double h = 0, s = 0, l = (mx + mn) / 2;
-        if (mx != mn) {
-            const double d = mx - mn;
-            s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
-            if (mx == r)      h = (g - bl) / d + (g < bl ? 6 : 0);
-            else if (mx == g) h = (bl - r) / d + 2;
-            else              h = (r - g) / d + 4;
-            h /= 6;
-        }
-        auto hue = [](double p, double q, double t) {
-            if (t < 0) t += 1;
-            if (t > 1) t -= 1;
-            if (t < 1.0 / 6) return p + (q - p) * 6 * t;
-            if (t < 0.5)     return q;
-            if (t < 2.0 / 3) return p + (q - p) * (2.0 / 3 - t) * 6;
-            return p;
-        };
-        auto to_rgb = [&](double L) {
-            if (s == 0) {
-                const auto v = static_cast<uint8_t>(L * 255 + 0.5);
-                return Color::rgb(v, v, v);
-            }
-            const double q = L < 0.5 ? L * (1 + s) : L + s - L * s;
-            const double p = 2 * L - q;
-            return Color::rgb(static_cast<uint8_t>(hue(p, q, h + 1.0 / 3) * 255 + 0.5),
-                              static_cast<uint8_t>(hue(p, q, h) * 255 + 0.5),
-                              static_cast<uint8_t>(hue(p, q, h - 1.0 / 3) * 255 + 0.5));
-        };
-        const bool dark_bg = lb < 0.18;
-        Color out = fg;
-        for (int step = 0; step < 20; ++step) {
-            l = dark_bg ? std::min(0.95, l + 0.03) : std::max(0.05, l - 0.03);
-            const auto c = to_rgb(l);
-            out = c;
-            if (ratio(rel_lum(c.r(), c.g(), c.b())) >= target) break;
-            if (l <= 0.05 || l >= 0.95) break;
-        }
-        return out;
+        return maya::readable_on(f, b, target);
     }
 
     // A plain (no band) row: gutter, then code with syntax + hit colours.

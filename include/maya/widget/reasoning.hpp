@@ -736,18 +736,31 @@ private:
         const int rows = measure_rows(body, w);
         if (rows <= cap) return body;
 
-        const int want = rows - cap;
+        // One row of the window goes to a `⋯ N lines above` marker, so a
+        // capped block says there is more instead of silently starting
+        // mid-thought. Height stays exactly `cap`.
+        const bool marker = cap >= 3;
+        const int want = rows - cap + (marker ? 1 : 0);
         const int cut  = drop_top_rows(body, want, w);
-        if (cut <= want) return body;
-        // A container's gap row cannot outlive the child above it, so a cut
-        // that lands on one eats a row more than asked. Hand it back as a
-        // blank row at the TOP of the window — which is what that gap looked
-        // like anyway — so the height stays exactly `cap`.
-        BoxElement pad;
-        pad.layout.height = Dimension::fixed(cut - want);
         BoxElement stack;
         stack.layout.direction = FlexDirection::Column;
-        stack.children.push_back(Element{std::move(pad)});
+        if (marker) {
+            TextElement m;
+            m.content = "\xe2\x8b\xaf " + std::to_string(cut)
+                      + (cut == 1 ? " line above" : " lines above");
+            m.style   = Style{}.with_fg(Color::slot(ThemeSlot::Muted)).with_italic();
+            m.wrap    = TextWrap::TruncateEnd;
+            stack.children.push_back(Element{std::move(m)});
+        }
+        // A container's gap row cannot outlive the child above it, so a cut
+        // that lands on one eats a row more than asked. Hand it back as a
+        // blank row so the height stays exactly `cap`.
+        if (cut > want) {
+            BoxElement pad;
+            pad.layout.height = Dimension::fixed(cut - want);
+            stack.children.push_back(Element{std::move(pad)});
+        }
+        if (!marker && cut <= want) return body;
         stack.children.push_back(std::move(body));
         return Element{std::move(stack)};
     }

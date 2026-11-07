@@ -43,8 +43,15 @@ void paint_box(const PaintCtx& c, const BoxElement& node) {
     // 2. Draw border.
     if (node.has_border()) {
         Style border_style = node.style;
-        if (node.border.colors.top.has_value()) {
-            border_style = border_style.with_fg(*node.border.colors.top);
+        // The border paints in one style, so take the first side that states
+        // a colour. Reading only `top` left a left-only rail (reasoning's ┃)
+        // uncoloured.
+        const auto& bc = node.border.colors;
+        if (const auto& c = bc.top    ? bc.top
+                          : bc.left   ? bc.left
+                          : bc.right  ? bc.right
+                                      : bc.bottom; c.has_value()) {
+            border_style = border_style.with_fg(*c);
         }
         uint16_t border_style_id = pool.intern(border_style);
         paint_border(canvas, node.border, abs_rect, border_style_id);

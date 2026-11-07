@@ -37,6 +37,21 @@ bool link_registry_used() noexcept { return g_links_used.load(std::memory_order_
 
 bool links_used() noexcept { return link_registry_used(); }
 
+// The foreground a style actually paints. A theme SLOT is the theme's own
+// colour choice, and many bundled schemes pick slots that sink into their
+// background (a third of them put `primary` under 4.5:1). So a slot fg is
+// lifted, hue kept, until it reads on the cell's background. Literal colours
+// are the caller's explicit choice and pass through untouched, as does
+// anything maya cannot measure (native's palette colours, inverse cells).
+static LitColor readable_fg(const Style& s, const Theme& th) noexcept {
+    const LitColor fg = th.resolve(*s.fg);
+    if (s.fg->kind() != ColorKind::Slot || s.inverse || !fg.has_channels())
+        return fg;
+    const LitColor bg = s.bg ? th.resolve(*s.bg) : th.background;
+    if (!bg.has_channels()) return fg;
+    return readable_on(fg, bg, 4.5);
+}
+
 uint16_t link_id(std::string_view uri) {
     if (!uri_ok(uri)) return 0;
     auto& r = links();
@@ -464,13 +479,13 @@ void StylePool::write_transition_sgr_uncached(uint16_t prev_id, uint16_t new_id,
     // wire were such no-op SGRs.
     const int level = active_color_level();
     const Theme& th = theme::live();
-    auto effective_fg = [&](const std::optional<Color>& c) -> std::optional<LitColor> {
-        if (c.has_value() && c->kind() != Color::Kind::Default)
-            return th.resolve(*c).degrade(level);
+    auto effective_fg = [&](const Style& s) -> std::optional<LitColor> {
+        if (s.fg.has_value() && s.fg->kind() != Color::Kind::Default)
+            return readable_fg(s, th).degrade(level);
         return std::nullopt;
     };
-    const std::optional<LitColor> from_fg = effective_fg(from.fg);
-    const std::optional<LitColor> to_fg   = effective_fg(to.fg);
+    const std::optional<LitColor> from_fg = effective_fg(from);
+    const std::optional<LitColor> to_fg   = effective_fg(to);
     if (from_fg != to_fg)
     {
         sep();
@@ -538,7 +553,7 @@ StylePool::Look StylePool::look_of(const Style& s) noexcept {
         | (s.inverse ? 8 : 0) | (s.strikethrough ? 16 : 0));
     if (level <= 0) return l;                 // monochrome: colours never reach the wire
     if (s.fg.has_value() && s.fg->kind() != Color::Kind::Default)
-        l.fg = th.resolve(*s.fg).degrade(level);
+        l.fg = readable_fg(s, th).degrade(level);
     if (s.bg.has_value()) {
         if (s.bg->kind() != Color::Kind::Default)
             l.bg = th.resolve(*s.bg).degrade(level);
@@ -577,7 +592,8 @@ std::string StylePool::build_sgr(const Style& s) {
     // explicit color SGR" — preserves terminal background transparency
     // (e.g. Ghostty) while still letting the cell overdraw underlying glyphs.
     if (s.fg.has_value() && s.fg->kind() != Color::Kind::Default) {
-        *p++ = ';'; p = append_color_sgr(p, *s.fg, true);
+        *p++ = ';';
+        p = append_resolved_sgr(p, readable_fg(s, theme::live()), true);
     }
     // ── Background: the theme's canvas is the DEFAULT, not an opt-in ────
     //

@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -1177,6 +1178,73 @@ static_assert(!BrandNeedsNoReason<Color>,
             static_cast<uint8_t>(out.r() + (toward.r() - out.r()) / 4),
             static_cast<uint8_t>(out.g() + (toward.g() - out.g()) / 4),
             static_cast<uint8_t>(out.b() + (toward.b() - out.b()) / 4));
+    }
+    return out;
+}
+
+// ── WCAG contrast ────────────────────────────────────────────────────────────────
+
+// Relative luminance of an RGB colour (WCAG 2.1), -1 for palette colours.
+[[nodiscard]] inline double rel_luminance(LitColor c) noexcept {
+    if (c.kind() != ColorKind::Rgb) return -1;
+    auto f = [](int v) {
+        const double s = v / 255.0;
+        return s <= 0.03928 ? s / 12.92 : std::pow((s + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * f(c.r()) + 0.7152 * f(c.g()) + 0.0722 * f(c.b());
+}
+
+// Contrast ratio between two RGB colours, 0 when either is unmeasurable.
+[[nodiscard]] inline double contrast_ratio(LitColor a, LitColor b) noexcept {
+    const double la = rel_luminance(a), lb = rel_luminance(b);
+    if (la < 0 || lb < 0) return 0;
+    return la > lb ? (la + 0.05) / (lb + 0.05) : (lb + 0.05) / (la + 0.05);
+}
+
+// `fg` with its lightness moved away from `bg` until the pair reaches
+// `target` contrast. Hue and saturation are kept, so a blue stays blue,
+// just lighter (or darker on a light background). Unchanged when it already
+// reads, or when either side is a palette colour we cannot measure.
+[[nodiscard]] inline LitColor readable_on(LitColor fg, LitColor bg,
+                                          double target) noexcept {
+    const double lb = rel_luminance(bg);
+    if (lb < 0 || fg.kind() != ColorKind::Rgb) return fg;
+    if (contrast_ratio(fg, bg) >= target) return fg;
+
+    const double r = fg.r() / 255.0, g = fg.g() / 255.0, b = fg.b() / 255.0;
+    const double mx = std::max({r, g, b}), mn = std::min({r, g, b});
+    double h = 0, s = 0, l = (mx + mn) / 2;
+    if (mx != mn) {
+        const double d = mx - mn;
+        s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+        if (mx == r)      h = (g - b) / d + (g < b ? 6 : 0);
+        else if (mx == g) h = (b - r) / d + 2;
+        else              h = (r - g) / d + 4;
+        h /= 6;
+    }
+    auto hue = [](double p, double q, double t) {
+        if (t < 0) t += 1;
+        if (t > 1) t -= 1;
+        if (t < 1.0 / 6) return p + (q - p) * 6 * t;
+        if (t < 0.5)     return q;
+        if (t < 2.0 / 3) return p + (q - p) * (2.0 / 3 - t) * 6;
+        return p;
+    };
+    auto to_rgb = [&](double L) {
+        auto ch = [](double v) { return static_cast<uint8_t>(v * 255 + 0.5); };
+        if (s == 0) return LitColor::rgb(ch(L), ch(L), ch(L));
+        const double q = L < 0.5 ? L * (1 + s) : L + s - L * s;
+        const double p = 2 * L - q;
+        return LitColor::rgb(ch(hue(p, q, h + 1.0 / 3)), ch(hue(p, q, h)),
+                             ch(hue(p, q, h - 1.0 / 3)));
+    };
+    const bool dark_bg = lb < 0.18;
+    LitColor out = fg;
+    for (int step = 0; step < 32; ++step) {
+        l = dark_bg ? std::min(0.97, l + 0.02) : std::max(0.03, l - 0.02);
+        out = to_rgb(l);
+        if (contrast_ratio(out, bg) >= target) break;
+        if (l <= 0.03 || l >= 0.97) break;
     }
     return out;
 }
