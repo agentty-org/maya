@@ -210,7 +210,34 @@ public:
         int stream_hunk_no = 0;
     };
 
-    explicit ToolBodyPreview(Config c) : cfg_(std::move(c)) {}
+    explicit ToolBodyPreview(Config c) : cfg_(std::move(c)) {
+        // A tab has no cell width, so tab-indented code (C, Go, Makefiles)
+        // lost its indentation. Expand to 4-column stops up front.
+        expand_tabs(cfg_.text);
+        for (auto& h : cfg_.hunks) {
+            expand_tabs(h.old_text);
+            expand_tabs(h.new_text);
+        }
+    }
+
+    static void expand_tabs(std::string& s) {
+        if (s.find('\t') == std::string::npos) return;
+        std::string out;
+        out.reserve(s.size() + 16);
+        int col = 0;
+        for (char c : s) {
+            if (c == '\t') {
+                const int n = 4 - (col % 4);
+                out.append(static_cast<std::size_t>(n), ' ');
+                col += n;
+            } else {
+                out += c;
+                if (c == '\n') col = 0;
+                else if ((static_cast<unsigned char>(c) & 0xC0) != 0x80) ++col;
+            }
+        }
+        s = std::move(out);
+    }
 
     operator Element() const { return build(); }
 
@@ -397,9 +424,11 @@ private:
                 rows.push_back(elision_marker(p.elided));
                 line_num += p.elided;
             }
-            char numbuf[8];
-            std::snprintf(numbuf, sizeof(numbuf), "%3d", line_num++);
-            rows.push_back(make_row(numbuf, marker_st,
+            // Generic tool output is messages, not a file: numbering it
+            // (`1 │ switched to branch master`) is noise. Keep the column
+            // so the rail lines up with numbered bodies.
+            (void)line_num++;
+            rows.push_back(make_row("   ", marker_st,
                                     p.lines[std::size_t(i)], content_st));
         }
         return v(rows).build();
