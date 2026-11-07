@@ -315,14 +315,26 @@ std::vector<Element> Panel::render_item(const Item& r, int index) const {
 
     const bool on_row = r.selected;
 
-    // The cursor row carries a subtle wash across its whole span. Applied
-    // per-run AND as the base style, because runs must cover the content in
-    // order and cannot overlap — a tint laid over the top would leave the gaps
-    // between cells untinted and read as broken stripes.
+    // The cursor row carries a wash across its whole span: the canvas mixed
+    // 16% toward the cursor bar's hue, so the selection reads in the same
+    // colour as its edge bar (like a tool card's header band). Falls back to
+    // the theme's surface when the colours can't be measured (native).
+    const Color row_bg = [&]() -> Color {
+        const Theme& lt = theme::live();
+        const auto hc = lt.resolve(th.cursor);
+        const auto bg = lt.resolve(Color::slot(ThemeSlot::Background));
+        if (!hc.has_channels() || !bg.has_channels()) return th.row_bg;
+        auto mix = [](int a, int b) { return static_cast<uint8_t>(a + (b - a) * 16 / 100); };
+        return Color::rgb(mix(bg.r(), hc.r()), mix(bg.g(), hc.g()), mix(bg.b(), hc.b()));
+    }();
+
+    // Applied per-run AND as the base style, because runs must cover the
+    // content in order and cannot overlap — a tint laid over the top would
+    // leave the gaps between cells untinted and read as broken stripes.
     const auto tint = [&](Style s) {
-        return (on_row && !s.inverse) ? s.with_bg(th.row_bg) : s;
+        return (on_row && !s.inverse) ? s.with_bg(row_bg) : s;
     };
-    const Style base = on_row ? Style{}.with_bg(th.row_bg) : Style{};
+    const Style base = on_row ? Style{}.with_bg(row_bg) : Style{};
 
     // Leading: edge bar, badge, label (+ fuzzy-match accents).
     std::string left;
