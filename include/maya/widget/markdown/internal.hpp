@@ -115,7 +115,7 @@ namespace maya {
     /* Surface, not black: a literal black background is a hole punched in  */\
     /* a light scheme. Surface is defined as "one step off the canvas".     */\
     X(code_bg,          Surface)                                              \
-    X(link_fg,          Primary)                                              \
+    X(link_fg,          Link)                                                 \
     X(image_fg,         Accent)                                               \
     X(strike_fg,        Muted)                                                \
     X(quote_bar,        Warning)                                              \

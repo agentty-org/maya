@@ -418,6 +418,12 @@ static Element render_list(const md::List& l, int depth) {
     std::vector<Element> items;
     items.reserve(l.items.size());
     int num = l.start_num;
+    // Two columns per level, for every kind of list (ordered and task items
+    // used to ignore depth, so a nested `1.` sat flush with its parent).
+    const std::string lead(static_cast<std::size_t>(2 + 2 * depth), ' ');
+    // Right-align numbers so `9.` and `10.` share a column.
+    const int last_num = l.start_num + static_cast<int>(l.items.size()) - 1;
+    const std::size_t num_w = std::to_string(std::max(last_num, l.start_num)).size();
 
     for (auto& item : l.items) {
         std::string prefix;
@@ -426,15 +432,18 @@ static Element render_list(const md::List& l, int depth) {
         if (item.checked.has_value()) {
             // Zed style: ✓/○ for task lists
             if (*item.checked) {
-                prefix = "  \xe2\x9c\x93 ";  // "  ✓ "
+                prefix = lead + "\xe2\x9c\x93 ";  // "✓ "
                 prefix_style = Style{}.with_fg(colors::checkbox_fg());
             } else {
-                prefix = "  \xe2\x97\x8b ";  // "  ○ "
+                prefix = lead + "\xe2\x97\x8b ";  // "○ "
                 prefix_style = Style{}.with_fg(colors::checkbox_off());
             }
         } else if (l.ordered) {
-            prefix = "  " + std::to_string(num++) + ". ";
-            prefix_style = Style{}.with_fg(colors::list_num());
+            std::string n = std::to_string(num++);
+            prefix = lead + std::string(num_w - n.size(), ' ') + n + ". ";
+            prefix_style = depth == 0
+                ? Style{}.with_fg(colors::list_num()).with_bold()
+                : Style{}.with_fg(colors::list_num());
         } else if (depth == 0) {
             // ▸ (U+25B8, black right-pointing small triangle) reads as
             // a directional "item start" cue — heavier than • (which
@@ -447,7 +456,7 @@ static Element render_list(const md::List& l, int depth) {
             // Nested items step down in visual weight: hollow ◦
             // signals "sub-item" without competing with the parent
             // ▸. Extra two-space indent reinforces the hierarchy.
-            prefix = "    \xe2\x97\xa6 ";  // "    ◦ "
+            prefix = lead + "\xe2\x97\xa6 ";  // "◦ "
             prefix_style = Style{}.with_fg(colors::list_bullet());
         }
 
