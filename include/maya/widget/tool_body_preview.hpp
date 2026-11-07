@@ -31,6 +31,7 @@
 //   }}.build();
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -56,6 +57,10 @@ namespace maya {
 // render/canvas.hpp) to keep this widget header light.
 [[nodiscard]] int terminal_color_level() noexcept;
 
+
+// A byte range of a diff line that changed vs its partner line, and the
+// brighter band it sits on. Namespace scope so it can be a default arg.
+struct DiffChange { std::size_t off = 0, len = 0; Color bg{}; };
 
 class ToolBodyPreview {
 public:
@@ -498,14 +503,44 @@ private:
                 // in line_st; the failure cue carries on the timeline
                 // border + ✗ icon. Inline `· exit N` stays readable as
                 // tail text; double-coloring would crowd the row.
-                rows.push_back(make_row(kPrompt, marker_st, content, line_st));
+                rows.push_back(make_row(kPrompt, marker_st, content, line_tone(ln, line_st)));
             } else {
-                rows.push_back(make_row(kPrompt, marker_st, ln, line_st));
+                rows.push_back(make_row(kPrompt, marker_st, ln, line_tone(ln, line_st)));
             }
         }
 
         if (rows.empty()) return blank();
         return v(rows).build();
+    }
+
+    // Colour for one line of shell output by what it says: errors and
+    // failures red, warnings yellow, passes green, everything else `base`.
+    [[nodiscard]] static Style line_tone(std::string_view ln, Style base) {
+        auto has = [&](std::string_view w) {
+            return ln.find(w) != std::string_view::npos;
+        };
+        auto has_ci = [&](std::string_view w) {
+            if (w.size() > ln.size()) return false;
+            for (std::size_t i = 0; i + w.size() <= ln.size(); ++i) {
+                std::size_t k = 0;
+                while (k < w.size()
+                       && std::tolower(static_cast<unsigned char>(ln[i + k])) == w[k]) ++k;
+                if (k == w.size()) return true;
+            }
+            return false;
+        };
+        if (has("error:") || has("error[") || has("FAILED") || has("FAIL ")
+            || has("panicked") || has("Traceback") || has("fatal:")
+            || has("Segmentation fault") || has("Assertion") || has("\xe2\x9c\x97"))
+            return Style{}.with_fg(Color::slot(ThemeSlot::Error));
+        if (has("warning:") || has("WARN") || has("deprecated"))
+            return Style{}.with_fg(Color::slot(ThemeSlot::Warning));
+        const bool some_failed = has_ci("failed") && !has_ci(" 0 failed");
+        if ((has_ci(" passed") && !has_ci(" 0 passed") && !some_failed)
+            || has("Status: SUCCESS") || has("100% tests passed")
+            || has("\xe2\x9c\x93") || has("PASS"))
+            return Style{}.with_fg(Color::slot(ThemeSlot::Success));
+        return base;
     }
 
     // ── Test-runner summary detection ─────────────────────────────────────
@@ -1240,15 +1275,18 @@ private:
             }).grow(1.0f);
     }
 
+    using Changed = DiffChange;
+
     // Same as band_row, but the body gets syntax colours (`syn`) and needle
     // hits painted over it. Both only change fg/weight, never the bg, so the
     // band stays solid.
     [[nodiscard]] Element band_row_hl(std::string gutter, Style gutter_st,
                                       std::string body, Style body_st,
                                       Style hit_st, Color bg,
-                                      const std::vector<StyledRun>* syn = nullptr) const {
+                                      const std::vector<StyledRun>* syn = nullptr,
+                                      Changed chg = {}) const {
         using namespace dsl;
-        auto body_runs = paint_runs(body, body_st, hit_st, syn);
+        auto body_runs = paint_runs(body, body_st, hit_st, syn, chg);
         if (body_runs.empty()
             || (body_runs.size() == 1 && body_runs[0].style == body_st))
             return band_row(std::move(gutter), gutter_st,
@@ -1287,6 +1325,28 @@ private:
 
     // ── Syntax colouring for code rows ───────────────────────────────────────
     using LineRuns = std::vector<std::vector<StyledRun>>;
+
+    // A file path with the directory receding and the filename standing
+    // out, so the eye lands on the file: `src/runtime/` + **turn.cpp**.
+    [[nodiscard]] static Element path_row(std::string_view path,
+                                          std::string_view prefix = {}) {
+        std::string out{prefix};
+        const auto slash = path.find_last_of('/');
+        const std::size_t cut = slash == std::string_view::npos ? 0 : slash + 1;
+        const std::size_t p0 = out.size();
+        out += path;
+        std::vector<StyledRun> runs;
+        if (p0) runs.push_back({0, p0, Style{}.with_fg(muted())});
+        if (cut) runs.push_back({p0, cut, Style{}.with_fg(accent()).with_dim()});
+        runs.push_back({p0 + cut, path.size() - cut,
+                        Style{}.with_fg(accent()).with_bold()});
+        return Element{TextElement{
+            .content = std::move(out),
+            .style   = {},
+            .wrap    = TextWrap::TruncateEnd,
+            .runs    = std::move(runs),
+        }};
+    }
 
     // WCAG relative luminance / contrast ratio.
     static double rel_lum(int r, int g, int b) {
@@ -1400,32 +1460,73 @@ private:
         return Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_bold();
     }
 
+    // Word-level diff of a removed line `a` against its added partner `b`:
+    // strip the common prefix and suffix, snapped out to word boundaries so
+    // an identifier is never split. Returns {a_off, a_len, b_off, b_len},
+    // all zero when the lines are too different for it to help.
+    struct WordChange { std::size_t ao = 0, al = 0, bo = 0, bl = 0; };
+    [[nodiscard]] static WordChange word_change(std::string_view a,
+                                                std::string_view b) {
+        auto word = [](char c) {
+            return std::isalnum(static_cast<unsigned char>(c)) || c == '_'
+                || (static_cast<unsigned char>(c) & 0x80);
+        };
+        std::size_t pre = 0;
+        while (pre < a.size() && pre < b.size() && a[pre] == b[pre]) ++pre;
+        std::size_t suf = 0;
+        while (suf < a.size() - pre && suf < b.size() - pre
+               && a[a.size() - 1 - suf] == b[b.size() - 1 - suf]) ++suf;
+        // Snap the prefix back to a word start, the suffix forward to a word end.
+        while (pre > 0 && word(a[pre - 1]) && pre < a.size() && word(a[pre])) --pre;
+        while (pre > 0 && pre <= b.size() && word(b[pre - 1]) && pre < b.size() && word(b[pre])) --pre;
+        auto snap_suf = [&](std::string_view s) {
+            while (suf > 0 && word(s[s.size() - suf]) && s.size() - suf > 0
+                   && word(s[s.size() - suf - 1])) --suf;
+        };
+        snap_suf(a); snap_suf(b);
+        if (pre + suf > a.size()) suf = a.size() - pre;
+        if (pre + suf > b.size()) suf = b.size() - pre;
+        WordChange w{pre, a.size() - pre - suf, pre, b.size() - pre - suf};
+        // Only worth showing when part of the line stayed the same.
+        const std::size_t kept = pre + suf;
+        const std::size_t lead = std::min(a.find_first_not_of(' '), a.size());
+        if (kept <= lead + 1 || (w.al == 0 && w.bl == 0)) return {};
+        if (w.al * 10 > a.size() * 7 && w.bl * 10 > b.size() * 7) return {};
+        return w;
+    }
+
     // Runs for one line of code: syntax colours over `base`, then needle
     // hits on top. Token fg wins, but bg/dim/bold from `base` are kept so a
-    // diff band stays solid. `hit` likewise only changes fg + bold.
+    // diff band stays solid. `hit` likewise only changes fg + bold. The
+    // `chg` range (word-level diff) gets its own, brighter bg.
     [[nodiscard]] std::vector<StyledRun> paint_runs(
             std::string_view line, Style base, Style hit,
-            const std::vector<StyledRun>* syn) const {
+            const std::vector<StyledRun>* syn, Changed chg = {}) const {
         const std::size_t n = line.size();
         std::vector<Style> per;   // style per byte, only built when needed
         const auto spans = needle_spans(line);
-        if ((!syn || syn->empty()) && spans.empty())
+        if ((!syn || syn->empty()) && spans.empty() && chg.len == 0)
             return n ? std::vector<StyledRun>{{0, n, base}}
                      : std::vector<StyledRun>{};
         per.assign(n, base);
+        const std::size_t ce = std::min(n, chg.off + chg.len);
+        auto in_chg = [&](std::size_t k) { return k >= chg.off && k < ce; };
+        for (std::size_t k = chg.off; k < ce; ++k) per[k].bg = chg.bg;
         // Keep each token's theme colour when it already reads on its
         // background; otherwise raise only its lightness (saturation kept)
         // until it does. Diff bands want more contrast than the panel.
         const Color against = base.bg ? *base.bg
                                       : Color::slot(ThemeSlot::Background);
         const double target = base.bg ? 6.0 : 4.5;
-        auto lift = [&](Color c) { return readable_on(c, against, target); };
+        auto lift = [&](Color c, std::size_t k) {
+            return readable_on(c, in_chg(k) ? chg.bg : against, target);
+        };
         if (syn) {
             for (const auto& r : *syn) {
                 const std::size_t e = std::min(n, r.byte_offset + r.byte_length);
                 for (std::size_t k = r.byte_offset; k < e; ++k) {
-                    Style s = base;
-                    if (r.style.fg) s.fg = lift(*r.style.fg);
+                    Style s = per[k];
+                    if (r.style.fg) s.fg = lift(*r.style.fg, k);
                     s.italic = r.style.italic;
                     s.bold   = base.bold || r.style.bold;
                     per[k] = s;
@@ -1897,6 +1998,29 @@ private:
                 code_lines[k] = l;
         }
         const auto syn = syntax_lines(code_lines);
+        // Word-level diff: pair each run of `-` lines with the `+` run right
+        // after it, line by line, and mark what changed on a brighter band.
+        std::vector<Changed> chg(p.lines.size());
+        if (bands) {
+            auto sign = [&](std::size_t k) {
+                const auto l = p.lines[k];
+                if (l.starts_with("+++ ") || l.starts_with("--- ") || l.empty()) return ' ';
+                return l[0];
+            };
+            for (std::size_t k = 0; k < p.lines.size();) {
+                if (sign(k) != '-') { ++k; continue; }
+                std::size_t r0 = k;
+                while (k < p.lines.size() && sign(k) == '-') ++k;
+                std::size_t a0 = k;
+                while (k < p.lines.size() && sign(k) == '+') ++k;
+                const std::size_t pairs = std::min(a0 - r0, k - a0);
+                for (std::size_t j = 0; j < pairs; ++j) {
+                    const auto w = word_change(code_lines[r0 + j], code_lines[a0 + j]);
+                    if (w.al) chg[r0 + j] = {w.ao, w.al, diff_palette::rem_rail};
+                    if (w.bl) chg[a0 + j] = {w.bo, w.bl, diff_palette::add_rail};
+                }
+            }
+        }
         for (int i = 0; i < static_cast<int>(p.lines.size()); ++i) {
             if (i == p.elision_at && p.elided > 0) {
                 rows.push_back(elision_marker(p.elided));
@@ -1944,7 +2068,10 @@ private:
                     else
                         label = to;
                     pending_from.clear();
-                    rows.push_back(text_row("\xe2\x96\x8f " + label, file_st));
+                    if (label.find("  \xe2\x86\x92  ") == std::string::npos)
+                        rows.push_back(path_row(label, "\xe2\x96\x8f "));
+                    else
+                        rows.push_back(text_row("\xe2\x96\x8f " + label, file_st));
                     continue;
                 }
             }
@@ -1963,7 +2090,7 @@ private:
                     rows.push_back(band_row_hl(std::move(g), add_sign_st,
                                                std::string{ln.substr(1)},
                                                add_body_st, add_hit_st, add_bg,
-                                               syn_at(syn, i)));
+                                               syn_at(syn, i), chg[std::size_t(i)]));
                 else
                     rows.push_back(code_row(std::move(g), add_sign_st, ln.substr(1),
                                             add_body_st, add_hit_st, syn_at(syn, i)));
@@ -1974,7 +2101,7 @@ private:
                     rows.push_back(band_row_hl(std::move(g), rem_sign_st,
                                                std::string{ln.substr(1)},
                                                rem_body_st, rem_hit_st, rem_bg,
-                                               syn_at(syn, i)));
+                                               syn_at(syn, i), chg[std::size_t(i)]));
                 else
                     rows.push_back(code_row(std::move(g), rem_sign_st, ln.substr(1),
                                             rem_body_st, rem_hit_st, syn_at(syn, i)));
@@ -2116,7 +2243,6 @@ private:
         const int total = static_cast<int>(matches.size());
         const int shown = std::min(total, cfg_.max_matches_shown);
 
-        const Style path_st = Style{}.with_fg(accent());                // header
         const Style num_st  = Style{}.with_fg(muted());                 // gutter
         const Style body_st = Style{}.with_fg(cfg_.text_color);         // match
         const Style raw_st  = Style{}.with_fg(cfg_.text_color);
@@ -2137,7 +2263,7 @@ private:
                 continue;
             }
             if (m.path != current_path) {
-                rows.push_back(text(std::string{m.path}, path_st).build());
+                rows.push_back(path_row(m.path));
                 current_path = m.path;
             }
             // "    42   match text" — leading 4-space indent, right-aligned

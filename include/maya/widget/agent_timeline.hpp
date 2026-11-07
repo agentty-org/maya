@@ -438,7 +438,7 @@ private:
             text(" " + ev.name + " ", chip_style(ev.status, ev.category_color))
                 | nowrap | shrink(0.0f),
             text("  "),
-            text(ev.detail, detail_style(ev.category_color, is_active)) | clip
+            h(detail_text(ev.detail, detail_style(ev.category_color, is_active)))
                 | shrink(1.0f)
             // NOTE: no per-event elapsed cell here. The duration of a
             // tool lives in the card's title-end (running tool / total)
@@ -543,6 +543,33 @@ private:
     }
 
     // ── Pure helpers (formatting / glyphs / colors) ────────────────────
+
+    // The header detail, with a trailing "+A −R" change stat painted
+    // green / red instead of the detail colour.
+    static Element detail_text(const std::string& d, Style st) {
+        const auto p = d.rfind("  \xc2\xb7  +");
+        if (p == std::string::npos)
+            return Element{TextElement{.content = d, .style = st,
+                                       .wrap = TextWrap::TruncateEnd}};
+        const std::size_t plus = p + 6;            // after "  ·  "
+        auto m = d.find(" \xe2\x88\x92", plus);
+        if (m == std::string::npos) m = d.size();
+        // Only a stat if the run after "+" is digits up to the minus/end.
+        for (std::size_t k = plus + 1; k < m; ++k)
+            if (d[k] < '0' || d[k] > '9')
+                return Element{TextElement{.content = d, .style = st,
+                                           .wrap = TextWrap::TruncateEnd}};
+        std::vector<StyledRun> runs{
+            {0, plus, st},
+            {plus, m - plus, Style{}.with_fg(Color::slot(ThemeSlot::Success)).with_bold()},
+        };
+        if (m < d.size())
+            runs.push_back({m, d.size() - m,
+                            Style{}.with_fg(Color::slot(ThemeSlot::Error)).with_bold()});
+        return Element{TextElement{.content = d, .style = st,
+                                   .wrap = TextWrap::TruncateEnd,
+                                   .runs = std::move(runs)}};
+    }
 
     static dsl::RuntimeTextNode<std::string_view>
     status_icon(AgentEventStatus s, int frame) {
