@@ -250,26 +250,23 @@ public:
 private:
     Config cfg_;
 
-    // ── Stats row: small-caps category badges separated by mid-dots.
-    //    Dots stay bright_black (truly ornamental — separators between
-    //    badges). Counts use ANSI 7 (mid-gray, legible) so "INSPECT 2 ·
-    //    MUTATE 1" doesn't collapse below readability on low-contrast
-    //    terminal themes.
+    // ── Stats row: `E X E C U T E 1  ·  I N S P E C T 3`. Each category
+    //    in bold letter-spaced caps in its own colour, the count in the
+    //    same colour, mid-dots between them. Reads as the card's headline.
     [[nodiscard]] Element stats_row() const {
         using namespace dsl;
-        // One small chip per category: `● inspect 3`, dot and label in the
-        // category colour, count in text. Same single row as before.
-        const Color count_color = Color::slot(ThemeSlot::Text);
+        const Color sep_color = Color::slot(ThemeSlot::Muted);
 
         std::vector<Element> parts;
-        parts.reserve(cfg_.stats.size() * 4);
+        parts.reserve(cfg_.stats.size() * 3);
         for (std::size_t i = 0; i < cfg_.stats.size(); ++i) {
             const auto& s = cfg_.stats[i];
-            if (i > 0) parts.push_back(text("   "));
-            parts.push_back(text("\xe2\x97\x8f ", Style{}.with_fg(s.color)));
-            parts.push_back(text(lower(s.label), Style{}.with_fg(s.color)));
+            if (i > 0)
+                parts.push_back(text("  \xc2\xb7  ", Style{}.with_fg(sep_color)));
+            parts.push_back(text(small_caps(s.label),
+                                 Style{}.with_fg(s.color).with_bold()));
             parts.push_back(text(" " + std::to_string(s.count),
-                                 Style{}.with_fg(count_color).with_bold()));
+                                 Style{}.with_fg(s.color).with_bold()));
         }
         return (h(parts) | grow(1.0f)).build();
     }
@@ -288,7 +285,7 @@ private:
         return h(
             text("   "),
             text(f.glyph + " ", Style{}.with_fg(f.color).with_bold()),
-            text(lower(f.text), Style{}.with_fg(f.color).with_bold()),
+            text(small_caps(f.text), Style{}.with_fg(f.color).with_bold()),
             text("   "),
             text(f.summary, Style{}.with_fg(Color::slot(ThemeSlot::Text)))
         ).build();
@@ -397,8 +394,23 @@ private:
             };
             rows.push_back(Element{std::move(comp)});
         } else {
-            build_event_body(rows, ev, is_terminal, cfg_.frame,
-                             std::string{tree_glyph(i, cfg_.events.size())});
+            // Live events go through a component too (uncached: no hash_id),
+            // so their rows are laid out at the card's width like settled
+            // ones. Pushed straight into the column they were sized to their
+            // content, and the band and panel behind them stopped where the
+            // text stopped.
+            ComponentElement comp;
+            auto ev_sp = std::make_shared<const AgentTimelineEvent>(ev);
+            comp.render = [ev_sp = std::move(ev_sp), is_terminal,
+                           frame = cfg_.frame,
+                           glyph = std::string{tree_glyph(i, cfg_.events.size())}]
+                          (int, int) -> Element {
+                std::vector<Element> sub;
+                sub.reserve(4);
+                build_event_body(sub, *ev_sp, is_terminal, frame, glyph);
+                return v(std::move(sub)).build();
+            };
+            rows.push_back(Element{std::move(comp)});
         }
 
         if (!is_last) {
