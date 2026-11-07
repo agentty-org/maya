@@ -431,6 +431,22 @@ private:
         // The body preview below is the place for full content; the
         // header stays a 1-line summary with an ellipsis at the cut.
         //
+        // The header is one two-tone pill: the tool name on a solid chip,
+        // then the detail on a soft band of the same hue running to the
+        // card's edge. Without measurable colours (theme::native) the band
+        // can't be mixed, so the detail stays plain text as before.
+        const auto band = band_bg(ev.status, ev.category_color);
+        const Style dst = band
+            ? Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_italic()
+            : detail_style(ev.category_color, is_active);
+        Element detail_el = is_active && frame > 0
+            ? shimmer_text(ev.detail, dst, frame)
+            : detail_text(ev.detail, dst);
+        Element detail_cell = band
+            ? (h(text("  "), std::move(detail_el), text(" ")) | bgc(*band)
+                   | grow(1.0f) | shrink(1.0f)).build()
+            : (h(text("  "), h(std::move(detail_el)) | shrink(1.0f))
+                   | shrink(1.0f)).build();
         out.push_back((h(
             text(glyph, tree_style(ev.category_color, is_active)),
             text(" "),
@@ -438,11 +454,7 @@ private:
             text("  "),
             text(" " + ev.name + " ", chip_style(ev.status, ev.category_color))
                 | nowrap | shrink(0.0f),
-            text("  "),
-            h(is_active && frame > 0
-                  ? shimmer_text(ev.detail, detail_style(ev.category_color, is_active), frame)
-                  : detail_text(ev.detail, detail_style(ev.category_color, is_active)))
-                | shrink(1.0f)
+            std::move(detail_cell)
             // NOTE: no per-event elapsed cell here. The duration of a
             // tool lives in the card's title-end (running tool / total)
             // and the DONE footer. A per-row right-aligned elapsed used
@@ -521,15 +533,35 @@ private:
                           step(bg.b(), fg.b()));
     }
 
-    // The tool name as a chip: bold ink on a solid fill of the tool's
-    // category colour (red when failed, yellow when rejected). A named
-    // scheme gets an explicit fill with the theme's inverse text; a palette
-    // colour (theme::native) can't be measured, so let the terminal swap
-    // its own fg/bg with SGR 7 instead.
-    static Style chip_style(AgentEventStatus s, Color cat) {
+    // The hue a row is drawn in: its category, red when failed, yellow when
+    // the user rejected it.
+    static Color chip_hue(AgentEventStatus s, Color cat) {
         Color hue = cat;
         if (s == AgentEventStatus::Failed)   hue = Color::slot(ThemeSlot::Error);
         if (s == AgentEventStatus::Rejected) hue = Color::slot(ThemeSlot::Warning);
+        return hue;
+    }
+
+    // The soft band behind a header's detail: the canvas mixed 22% toward
+    // the row's hue, so it reads as the chip's lighter (or, on a light
+    // theme, paler) sibling. nullopt when either colour can't be measured.
+    static std::optional<Color> band_bg(AgentEventStatus s, Color cat) {
+        const Theme& th = theme::live();
+        const auto hc = th.resolve(chip_hue(s, cat));
+        const auto bg = th.resolve(Color::slot(ThemeSlot::Background));
+        if (!hc.has_channels() || !bg.has_channels()) return std::nullopt;
+        auto mix = [](int a, int b) {
+            return static_cast<uint8_t>(a + (b - a) * 22 / 100);
+        };
+        return Color::rgb(mix(bg.r(), hc.r()), mix(bg.g(), hc.g()), mix(bg.b(), hc.b()));
+    }
+
+    // The tool name as a chip: bold ink on a solid fill of the row's hue.
+    // A named scheme gets an explicit fill with the theme's inverse text; a
+    // palette colour (theme::native) can't be measured, so let the terminal
+    // swap its own fg/bg with SGR 7 instead.
+    static Style chip_style(AgentEventStatus s, Color cat) {
+        const Color hue = chip_hue(s, cat);
         if (theme::live().resolve(hue).has_channels())
             return Style{}.with_bg(hue)
                           .with_fg(Color::slot(ThemeSlot::InverseText))
