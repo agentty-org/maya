@@ -29,7 +29,9 @@
 // point of choosing one: the user has said "paint it like this" and maya
 // then owns the whole surface. They are never a default.
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <concepts>
 #include <cassert>
 #include <cstdlib>
@@ -527,6 +529,105 @@ inline void set_live(const Theme& t) noexcept {
 inline void set_live(Theme&& t) noexcept { set_live(static_cast<const Theme&>(t)); }
 [[nodiscard]] inline bool try_set_live(Theme&& t) noexcept {
     return try_set_live(static_cast<const Theme&>(t));
+}
+
+// ============================================================================
+// with_contrast_floor — lift a scheme's ink slots until they read
+// ============================================================================
+// Measured across the 615 bundled schemes: `primary`, `accent` and `error`
+// fall under 4.5:1 against their own background in over a third of them,
+// and `muted` under 3:1 in many. Everything coloured by those slots (links,
+// headings, bullets, hints) was hard to read there, and fixing it one
+// widget at a time never ends.
+//
+// This returns `t` with each ink slot moved in LIGHTNESS only (hue and
+// saturation kept) until it reaches the floor against `background`: 4.5:1
+// for the hue slots, 3:1 for the deliberately quiet ones. A slot that
+// already reads is untouched, and so is any slot or background that isn't
+// an RGB colour (theme::native states none, so it comes back unchanged).
+// Backgrounds, bands and the chip ink are not ink-on-canvas, so they are
+// left alone.
+namespace detail {
+[[nodiscard]] inline double rel_lum(const LitColor& c) noexcept {
+    auto f = [](int v) {
+        const double s = v / 255.0;
+        return s <= 0.03928 ? s / 12.92 : std::pow((s + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * f(c.r()) + 0.7152 * f(c.g()) + 0.0722 * f(c.b());
+}
+[[nodiscard]] inline double contrast(const LitColor& a, const LitColor& b) noexcept {
+    const double x = rel_lum(a), y = rel_lum(b);
+    return (std::max(x, y) + 0.05) / (std::min(x, y) + 0.05);
+}
+// `fg` with its HSL lightness stepped away from `bg` until it reaches
+// `target`, or as far as it can go.
+[[nodiscard]] inline LitColor lift_to(LitColor fg, const LitColor& bg,
+                                      double target) noexcept {
+    if (!fg.has_channels() || !bg.has_channels()) return fg;
+    if (contrast(fg, bg) >= target) return fg;
+    const double r = fg.r() / 255.0, g = fg.g() / 255.0, b = fg.b() / 255.0;
+    const double mx = std::max({r, g, b}), mn = std::min({r, g, b});
+    double h = 0, s = 0, l = (mx + mn) / 2;
+    if (mx != mn) {
+        const double d = mx - mn;
+        s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+        if (mx == r)      h = (g - b) / d + (g < b ? 6 : 0);
+        else if (mx == g) h = (b - r) / d + 2;
+        else              h = (r - g) / d + 4;
+        h /= 6;
+    }
+    auto hue = [](double p, double q, double t) {
+        if (t < 0) t += 1;
+        if (t > 1) t -= 1;
+        if (t < 1.0 / 6) return p + (q - p) * 6 * t;
+        if (t < 0.5)     return q;
+        if (t < 2.0 / 3) return p + (q - p) * (2.0 / 3 - t) * 6;
+        return p;
+    };
+    auto at = [&](double L) {
+        auto byte = [](double v) {
+            return static_cast<uint8_t>(std::clamp(v, 0.0, 1.0) * 255 + 0.5);
+        };
+        if (s == 0) return LitColor::rgb(byte(L), byte(L), byte(L));
+        const double q = L < 0.5 ? L * (1 + s) : L + s - L * s;
+        const double p = 2 * L - q;
+        return LitColor::rgb(byte(hue(p, q, h + 1.0 / 3)), byte(hue(p, q, h)),
+                             byte(hue(p, q, h - 1.0 / 3)));
+    };
+    // Walk both ways and keep whichever reaches the target first (or gets
+    // closest). Usually that is away from the canvas, but on a mid-grey
+    // canvas the far side can be the only one with room.
+    auto walk = [&](bool up) {
+        double L = l;
+        LitColor best = fg;
+        for (int i = 0; i < 50; ++i) {
+            L = up ? std::min(1.0, L + 0.02) : std::max(0.0, L - 0.02);
+            const LitColor c = at(L);
+            if (contrast(c, bg) > contrast(best, bg)) best = c;
+            if (contrast(c, bg) >= target || L <= 0.0 || L >= 1.0) break;
+        }
+        return best;
+    };
+    const LitColor away = walk(rel_lum(bg) < 0.18);
+    if (contrast(away, bg) >= target) return away;
+    const LitColor toward = walk(rel_lum(bg) >= 0.18);
+    const LitColor best = contrast(toward, bg) > contrast(away, bg) ? toward : away;
+    return contrast(best, bg) > contrast(fg, bg) ? best : fg;
+}
+}  // namespace detail
+
+[[nodiscard]] inline Theme with_contrast_floor(const Theme& t,
+                                               double ink   = 4.5,
+                                               double quiet = 3.0) noexcept {
+    Theme out = t;
+    const LitColor bg = t.background;
+    if (!bg.has_channels()) return out;
+    for (LitColor* c : {&out.primary, &out.secondary, &out.accent, &out.success,
+                        &out.warning, &out.error, &out.info, &out.link, &out.text})
+        *c = detail::lift_to(*c, bg, ink);
+    for (LitColor* c : {&out.muted, &out.placeholder})
+        *c = detail::lift_to(*c, bg, quiet);
+    return out;
 }
 
 // ============================================================================
