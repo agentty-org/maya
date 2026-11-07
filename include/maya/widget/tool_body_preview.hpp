@@ -1326,6 +1326,17 @@ private:
     // ── Syntax colouring for code rows ───────────────────────────────────────
     using LineRuns = std::vector<std::vector<StyledRun>>;
 
+    // A path's extension, lowercased ("cpp" for src/a.cpp), or empty.
+    [[nodiscard]] static std::string ext_of(std::string_view path) {
+        const auto slash = path.find_last_of('/');
+        auto base = slash == std::string_view::npos ? path : path.substr(slash + 1);
+        const auto dot = base.find_last_of('.');
+        if (dot == std::string_view::npos || dot + 1 >= base.size()) return {};
+        std::string ext{base.substr(dot + 1)};
+        for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return ext;
+    }
+
     // GitHub linguist colour for a file's extension, or nullopt when
     // unknown. Content colour (like a diff's red/green), not chrome.
     [[nodiscard]] static std::optional<Color> lang_color(std::string_view path) {
@@ -1439,6 +1450,18 @@ private:
         return Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_bold();
     }
 
+    // Background for a search hit: the canvas mixed 30% toward the theme's
+    // warning hue, a dim amber like an editor's find highlight. nullopt
+    // under native, where it can't be mixed; the hit is then bold only.
+    [[nodiscard]] static std::optional<Color> search_bg() {
+        const Theme& th = theme::live();
+        const auto w  = th.resolve(Color::slot(ThemeSlot::Warning));
+        const auto bg = th.resolve(Color::slot(ThemeSlot::Background));
+        if (!w.has_channels() || !bg.has_channels()) return std::nullopt;
+        auto mix = [](int a, int b) { return static_cast<uint8_t>(a + (b - a) * 30 / 100); };
+        return Color::rgb(mix(bg.r(), w.r()), mix(bg.g(), w.g()), mix(bg.b(), w.b()));
+    }
+
     // Word-level diff of a removed line `a` against its added partner `b`:
     // strip the common prefix and suffix, snapped out to word boundaries so
     // an identifier is never split. Returns {a_off, a_len, b_off, b_len},
@@ -1516,6 +1539,9 @@ private:
             for (std::size_t k = off; k < std::min(n, off + len); ++k) {
                 Style s = per[k];
                 s.fg = hit.fg; s.bold = true; s.dim = false; s.italic = false;
+                // Off a diff band, give the hit its own editor-style match
+                // band so it stands out from syntax colours around it.
+                if (!base.bg) s.bg = search_bg();
                 per[k] = s;
             }
         std::vector<StyledRun> out;
@@ -2270,27 +2296,16 @@ private:
             // EVERY occurrence, not just the first: a line like
             // `wrap == Truncate || node.wrap == Truncate` is exactly where
             // this earns its keep.
-            const std::string& needle = cfg_.match_needle;
-            if (!needle.empty()) {
-                // needle_spans folds case (grep defaults to insensitive) and
-                // handles a '\n'-separated alternation, so `foo|bar` lights up
-                // both. Spans are exact byte offsets into the original text.
-                const auto spans = needle_spans(m.rest);
-                if (spans.empty()) {
-                    runs.push_back({rest_off, m.rest.size(), body_st});
-                } else {
-                    std::size_t at = 0;
-                    for (auto [off, len] : spans) {
-                        if (off > at)
-                            runs.push_back({rest_off + at, off - at, body_st});
-                        runs.push_back({rest_off + off, len, hit_st});
-                        at = off + len;
-                    }
-                    if (at < m.rest.size())
-                        runs.push_back({rest_off + at, m.rest.size() - at, body_st});
-                }
-            } else {
-                runs.push_back({rest_off, m.rest.size(), body_st});
+            // Syntax colour from the group's file extension (one line at a
+            // time: a grep row has no surrounding context), then the needle
+            // in bold text colour on top. Unknown extensions stay flat.
+            const std::string lang = ext_of(m.path);
+            const auto syn = lang.empty()
+                ? LineRuns{}
+                : syntax_line_runs(m.rest, lang);
+            for (auto r : paint_runs(m.rest, body_st, hit_st, syn_at(syn, 0))) {
+                r.byte_offset += rest_off;
+                runs.push_back(r);
             }
             rows.push_back(Element{TextElement{
                 .content = std::move(content),
@@ -2573,8 +2588,11 @@ private:
             if (spans.empty()) {
                 runs.push_back({content_off, content.size(), content_style});
             } else {
-                const Style hit_style =
-                    Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_bold();
+                const Style hit_style = [] {
+                    Style s = Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_bold();
+                    if (auto b = search_bg()) s = s.with_bg(*b);
+                    return s;
+                }();
                 std::size_t at = 0;
                 for (auto [off, len] : spans) {
                     if (off > at)
