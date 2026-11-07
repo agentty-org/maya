@@ -23,6 +23,7 @@
 //                         .color=Color::slot(ThemeSlot::Success), .summary="3 actions   1.4s"}},
 //   }}.build();
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <optional>
@@ -438,7 +439,9 @@ private:
             text(" " + ev.name + " ", chip_style(ev.status, ev.category_color))
                 | nowrap | shrink(0.0f),
             text("  "),
-            h(detail_text(ev.detail, detail_style(ev.category_color, is_active)))
+            h(is_active && frame > 0
+                  ? shimmer_text(ev.detail, detail_style(ev.category_color, is_active), frame)
+                  : detail_text(ev.detail, detail_style(ev.category_color, is_active)))
                 | shrink(1.0f)
             // NOTE: no per-event elapsed cell here. The duration of a
             // tool lives in the card's title-end (running tool / total)
@@ -543,6 +546,39 @@ private:
     }
 
     // ── Pure helpers (formatting / glyphs / colors) ────────────────────
+
+    // In-flight detail text with a soft highlight sweeping left to right,
+    // so a running tool reads as alive. Driven by the spinner frame: where
+    // the spinner is frozen (frame 0, committed rows) this never runs.
+    static Element shimmer_text(const std::string& d, Style st, int frame) {
+        // Code-point start offsets, so a run never splits a UTF-8 sequence.
+        std::vector<std::size_t> cps;
+        for (std::size_t i = 0; i < d.size(); ++i)
+            if ((static_cast<unsigned char>(d[i]) & 0xC0) != 0x80) cps.push_back(i);
+        const int n = static_cast<int>(cps.size());
+        if (n == 0)
+            return Element{TextElement{.content = d, .style = st,
+                                       .wrap = TextWrap::TruncateEnd}};
+        constexpr int kWidth = 8, kGap = 24;
+        const int period = n + kWidth + kGap;
+        const int head = (frame * 2) % period - kWidth;
+        auto at = [&](int k) { return k >= n ? d.size() : cps[std::size_t(k)]; };
+        const Style mid  = Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_italic();
+        const Style peak = mid.with_bold();
+        std::vector<StyledRun> runs;
+        auto push = [&](int a, int b, Style s) {
+            a = std::clamp(a, 0, n); b = std::clamp(b, 0, n);
+            if (b > a) runs.push_back({at(a), at(b) - at(a), s});
+        };
+        push(0, head, st);
+        push(head, head + 2, mid);
+        push(head + 2, head + kWidth - 2, peak);
+        push(head + kWidth - 2, head + kWidth, mid);
+        push(head + kWidth, n, st);
+        return Element{TextElement{.content = d, .style = st,
+                                   .wrap = TextWrap::TruncateEnd,
+                                   .runs = std::move(runs)}};
+    }
 
     // The header detail, with a trailing "+A −R" change stat painted
     // green / red instead of the detail colour.

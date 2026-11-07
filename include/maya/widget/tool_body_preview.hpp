@@ -1326,17 +1326,53 @@ private:
     // ── Syntax colouring for code rows ───────────────────────────────────────
     using LineRuns = std::vector<std::vector<StyledRun>>;
 
+    // GitHub linguist colour for a file's extension, or nullopt when
+    // unknown. Content colour (like a diff's red/green), not chrome.
+    [[nodiscard]] static std::optional<Color> lang_color(std::string_view path) {
+        const auto slash = path.find_last_of('/');
+        auto base = slash == std::string_view::npos ? path : path.substr(slash + 1);
+        const auto dot = base.find_last_of('.');
+        std::string ext{dot == std::string_view::npos ? base : base.substr(dot + 1)};
+        for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        struct E { const char* ext; std::uint32_t rgb; };
+        static constexpr E table[] = {
+            {"cpp", 0xF34B7D}, {"cc", 0xF34B7D}, {"cxx", 0xF34B7D}, {"hpp", 0xF34B7D},
+            {"hh", 0xF34B7D},  {"c", 0x555555},   {"h", 0x555555},   {"py", 0x3572A5},
+            {"rs", 0xDEA584},  {"go", 0x00ADD8},  {"ts", 0x3178C6},  {"tsx", 0x3178C6},
+            {"js", 0xF1E05A},  {"mjs", 0xF1E05A}, {"jsx", 0xF1E05A}, {"sh", 0x89E051},
+            {"bash", 0x89E051},{"zsh", 0x89E051}, {"md", 0x083FA1},  {"json", 0xCBCB41},
+            {"cmake", 0xDA3434},{"lua", 0x000080}, {"java", 0xB07219},
+            {"kt", 0xA97BFF},  {"swift", 0xF05138},{"rb", 0x701516},  {"el", 0xC065DB},
+            {"toml", 0x9C4221},{"yml", 0xCB171E}, {"yaml", 0xCB171E},{"html", 0xE34C26},
+            {"css", 0x563D7C}, {"zig", 0xEC915C}, {"nix", 0x7E7EFF}, {"vim", 0x199F4B},
+            {"glsl", 0x5686A5},{"frag", 0x5686A5},{"vert", 0x5686A5},{"sql", 0xE38C00},
+        };
+        for (const auto& e : table)
+            if (ext == e.ext)
+                return Color::rgb(static_cast<uint8_t>(e.rgb >> 16),
+                                  static_cast<uint8_t>(e.rgb >> 8),
+                                  static_cast<uint8_t>(e.rgb));
+        return std::nullopt;
+    }
+
     // A file path with the directory receding and the filename standing
-    // out, so the eye lands on the file: `src/runtime/` + **turn.cpp**.
+    // out, so the eye lands on the file: `● src/runtime/` + **turn.cpp**.
+    // The dot is the language colour, lifted until it reads.
     [[nodiscard]] static Element path_row(std::string_view path,
                                           std::string_view prefix = {}) {
         std::string out{prefix};
+        std::vector<StyledRun> runs;
+        if (!out.empty()) runs.push_back({0, out.size(), Style{}.with_fg(muted())});
+        if (auto lc = lang_color(path)) {
+            const std::size_t d0 = out.size();
+            out += "\xe2\x97\x8f ";
+            runs.push_back({d0, 3, Style{}.with_fg(
+                readable_on(*lc, Color::slot(ThemeSlot::Background), 3.0))});
+        }
         const auto slash = path.find_last_of('/');
         const std::size_t cut = slash == std::string_view::npos ? 0 : slash + 1;
         const std::size_t p0 = out.size();
         out += path;
-        std::vector<StyledRun> runs;
-        if (p0) runs.push_back({0, p0, Style{}.with_fg(muted())});
         if (cut) runs.push_back({p0, cut, Style{}.with_fg(accent()).with_dim()});
         runs.push_back({p0 + cut, path.size() - cut,
                         Style{}.with_fg(accent()).with_bold()});
