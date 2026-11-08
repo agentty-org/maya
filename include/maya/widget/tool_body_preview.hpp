@@ -1455,7 +1455,9 @@ private:
     // named colours, so native reads as well as a scheme: URLs and paths
     // in link, numbers in warning, quoted strings in success, git hashes in
     // accent, --flags in info, key= / key: labels in primary, ✓ / ✗ in
-    // success / error.
+    // success / error. Public so a full-screen output viewer colours text
+    // the same way the card does.
+public:
     [[nodiscard]] static std::vector<StyledRun> output_tokens(std::string_view s) {
         std::vector<StyledRun> out;
         const Style url_st  = Style{}.with_fg(Color::slot(ThemeSlot::Link)).with_underline();
@@ -1573,6 +1575,7 @@ private:
         }
         return out;
     }
+private:
 
     // A path's extension, lowercased ("cpp" for src/a.cpp), or empty.
     [[nodiscard]] static std::string ext_of(std::string_view path) {
