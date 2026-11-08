@@ -1444,7 +1444,7 @@ Element Panel::build() const {
     for (const auto& f_row : cfg_.footer) stack.push_back(f_row);
 
     return maya::detail::vstack()
-        .padding(1, 2)
+        .padding(cfg_.tight ? 0 : 1, 2)
         // The panel sits ON the canvas, so it carries the canvas colour.
         //
         // Without this the frame box states no background at all, and every

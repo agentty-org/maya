@@ -190,6 +190,10 @@ struct Config {
     // rather than as a page of statistics.
     bool header_rule = true;
 
+    // Drop the blank row inside the top and bottom border. For a terminal so
+    // short that those two rows are the difference between fitting and not.
+    bool tight = false;
+
     // How many leading items sit ABOVE the column split, full width.
     //
     // A banner is not a section. The column flow balances cells by height,
