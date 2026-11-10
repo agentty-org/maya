@@ -1287,6 +1287,32 @@ TEST_CASE("reasoning stream: live vs settled chrome, and no fold") {
                         "settled gradient reasoning keeps the full body");
     }
 
+    // A capped block's "N lines above" counts every hidden row, including
+    // the ones the coarse prune drops before windowing.
+    {
+        std::string body;
+        for (int i = 0; i < 40; ++i)
+            body += "Paragraph " + std::to_string(i) +
+                    " is long enough to wrap across several rows here.\n\n";
+        const auto rows_of = [&](int cap) {
+            maya::ReasoningStream::Config cfg;
+            cfg.live_tail_rows = cap;
+            maya::ReasoningStream rs{cfg};
+            rs.set_content(body);
+            rs.finish();
+            rs.set_live(false);
+            return render_at(rs.build(), 44, 400);
+        };
+        const auto full = rows_of(0);
+        const auto cut  = rows_of(8);
+        // Body rows hidden = uncapped rows - capped rows + the marker row.
+        const int hidden = full.content_h - cut.content_h + 1;
+        const std::string s = joined(cut);
+        MAYA_TEST_CHECK(s.find(" " + std::to_string(hidden) + " lines above")
+                            != std::string::npos,
+                        "marker counts every hidden row");
+    }
+
     // Structured beats: decision-marker paragraphs render as waypoints. We
     // can't assert color via the text harness, but the render must keep the
     // beat lines (exercises is_beat + the waypoint recolor path end to end).

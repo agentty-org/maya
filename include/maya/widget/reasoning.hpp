@@ -626,7 +626,13 @@ private:
             // can never land inside a cap-row window. Dropping them keeps
             // the per-frame work bounded by the window, not by how long the
             // model has been thinking.
+            // The rows it drops still count toward the "lines above" marker,
+            // so measure the whole body once first.
+            int full_rows = 0;
             if (cap > 0 && total > cap) {
+                flatten_components(rendered, w, h);
+                drop_trailing_blanks(rendered, w, h);   // not "above"
+                full_rows = measure_rows(rendered, w);
                 int pidx = 0;
                 prune_to_tail(rendered, total - cap, pidx);
                 total = cap;
@@ -651,7 +657,8 @@ private:
             // last row is always the newest text, and the next delta brings
             // its own spacing back.
             drop_trailing_blanks(rendered, w, h);
-            return cap > 0 ? window_to_rows(std::move(rendered), cap, w, h)
+            return cap > 0 ? window_to_rows(std::move(rendered), cap, w, h,
+                                            full_rows)
                            : rendered;
         };
         return Element{std::move(comp)};
@@ -730,24 +737,29 @@ private:
     // paragraph, so the window holds its height while markdown structure,
     // styled runs and the reveal caret all survive — and the caret is at the
     // bottom, which is the edge the window is anchored to.
-    static Element window_to_rows(Element body, int cap, int w, int h) {
+    // `full_rows` is the body's height before the coarse prune (0 = no
+    // prune); rows dropped there count toward the marker too.
+    static Element window_to_rows(Element body, int cap, int w, int h,
+                                  int full_rows = 0) {
         if (w <= 0 || cap <= 0) return body;
         flatten_components(body, w, h);
         const int rows = measure_rows(body, w);
-        if (rows <= cap) return body;
+        const int hidden = std::max(0, full_rows - rows);
+        if (rows <= cap && (hidden <= 0 || cap < 3)) return body;
 
         // One row of the window goes to a `⋯ N lines above` marker, so a
         // capped block says there is more instead of silently starting
         // mid-thought. Height stays exactly `cap`.
         const bool marker = cap >= 3;
-        const int want = rows - cap + (marker ? 1 : 0);
+        const int want = std::max(0, rows - cap + (marker ? 1 : 0));
         const int cut  = drop_top_rows(body, want, w);
         BoxElement stack;
         stack.layout.direction = FlexDirection::Column;
         if (marker) {
+            const int above = hidden + cut;
             TextElement m;
-            m.content = "\xe2\x8b\xaf " + std::to_string(cut)
-                      + (cut == 1 ? " line above" : " lines above");
+            m.content = "\xe2\x8b\xaf " + std::to_string(above)
+                      + (above == 1 ? " line above" : " lines above");
             m.style   = Style{}.with_fg(Color::slot(ThemeSlot::Muted)).with_italic();
             m.wrap    = TextWrap::TruncateEnd;
             stack.children.push_back(Element{std::move(m)});
