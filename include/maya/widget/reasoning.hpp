@@ -113,6 +113,9 @@ public:
         // dipped whenever a shorter paragraph became the newest node, and a
         // mid-stream shrink yanks the host's composer up.
         int   live_tail_rows = 0;
+        // Appended to the "⋯ N lines above" marker of a capped block, so it
+        // can say how to read the rest (e.g. "^U to read"). Empty = none.
+        std::string more_hint;
         // STRUCTURE the reasoning into beats: paragraph-leading decision
         // markers ("Let me…", "First", "Actually", "So," …) and markdown
         // emphasis/headers render as bright `waypoint_fg` waypoints while the
@@ -608,6 +611,7 @@ private:
         const bool pulse = cfg_.pulse && live_;
         const int  cap   = cfg_.live_tail_rows;   // host-decided, see Config
         const bool structured = cfg_.structured;
+        std::string more_hint = cfg_.more_hint;
         // Resolved up front: everything below BLENDS these (lerp, darken), and
         // blending needs channels. cfg_ holds Color so a host may configure a
         // theme slot; this is the boundary where it becomes a painted colour.
@@ -617,7 +621,7 @@ private:
         const LitColor waypoint = th_.resolve(cfg_.waypoint_fg);
         ComponentElement comp;
         comp.render = [body = std::move(body), fg, bright, waypoint,
-                       grad, pulse, cap, structured]
+                       grad, pulse, cap, structured, more_hint = std::move(more_hint)]
                       (int w, int h) -> Element {
             Element rendered = body; // copy the (cheap) wrapper node
             int total = materialize_and_count(rendered, w, h);
@@ -658,7 +662,7 @@ private:
             // its own spacing back.
             drop_trailing_blanks(rendered, w, h);
             return cap > 0 ? window_to_rows(std::move(rendered), cap, w, h,
-                                            full_rows)
+                                            full_rows, more_hint)
                            : rendered;
         };
         return Element{std::move(comp)};
@@ -740,7 +744,7 @@ private:
     // `full_rows` is the body's height before the coarse prune (0 = no
     // prune); rows dropped there count toward the marker too.
     static Element window_to_rows(Element body, int cap, int w, int h,
-                                  int full_rows = 0) {
+                                  int full_rows = 0, std::string_view hint = {}) {
         if (w <= 0 || cap <= 0) return body;
         flatten_components(body, w, h);
         const int rows = measure_rows(body, w);
@@ -760,6 +764,7 @@ private:
             TextElement m;
             m.content = "\xe2\x8b\xaf " + std::to_string(above)
                       + (above == 1 ? " line above" : " lines above");
+            if (!hint.empty()) m.content += " \xc2\xb7 " + std::string{hint};
             m.style   = Style{}.with_fg(Color::slot(ThemeSlot::Muted)).with_italic();
             m.wrap    = TextWrap::TruncateEnd;
             stack.children.push_back(Element{std::move(m)});
