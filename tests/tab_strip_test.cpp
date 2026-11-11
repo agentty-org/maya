@@ -345,3 +345,45 @@ TEST_CASE("tab strip: non-ASCII labels underline by display columns") {
     // Two wide glyphs underline as four columns.
     CHECK(glyphs(r.rows[1]) == 4);
 }
+
+namespace {
+TabStrip pills(int active) {
+    TabStrip s;
+    s.marker(TabMark::Pill);
+    s.theme.active_bg = Color::blue();
+    s.tab("login.cpp").dot(Color::yellow(), "o").part("+2", Color::green()).part("-2", Color::red());
+    s.tab("http.cpp").dot(Color::yellow(), "o").part("+9", Color::green());
+    s.tab("README.md").part("-1", Color::red());
+    s.active(active);
+    return s;
+}
+}  // namespace
+
+TEST_CASE("tab strip: Pill is one row and tabs don't move when you switch") {
+    const auto a = render(pills(0), 80), b = render(pills(1), 80);
+    REQUIRE(a.rows.size() == 1);
+    REQUIRE(b.rows.size() == 1);
+    for (const char* label : {"login.cpp", "http.cpp", "README.md"})
+        CHECK(a.rows[0].find(label) == b.rows[0].find(label));
+    // Every coloured part is there, joined by a space.
+    CHECK(has(a, "+2 -2"));
+    CHECK(has(a, "+9"));
+}
+
+TEST_CASE("tab strip: the Pill chip covers the whole active tab") {
+    StylePool pool;
+    Canvas canvas(80, 4, &pool);
+    render_tree(pills(1).build(), canvas, pool, theme::native, true);
+    const std::string row = row_text(canvas, 0, 80);
+    const auto from = row.find("o http.cpp"), to = row.find("+9") + 2;
+    REQUIRE(from != std::string::npos);
+    // The dot, the name and the diffstat all sit on the fill...
+    for (auto x = from; x < to; ++x)
+        CHECK(pool.get(canvas.get(static_cast<int>(x), 0).style_id).bg.has_value());
+    // ...the idle tabs don't...
+    const auto idle = row.find("login.cpp");
+    CHECK_FALSE(pool.get(canvas.get(static_cast<int>(idle), 0).style_id).bg.has_value());
+    // ...and a coloured part keeps its own colour inside the chip.
+    const auto plus = row.find("+9");
+    CHECK(pool.get(canvas.get(static_cast<int>(plus), 0).style_id).fg == Color::green());
+}

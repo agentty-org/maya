@@ -101,6 +101,13 @@ enum class TabMark : std::uint8_t {
     // against "these are views of one thing". The dividers cost columns, so
     // it wants a wide surface.
     Editor,
+    // The whole active tab (dot, label and detail) is a rounded chip:
+    // half-block ends in `theme.active_bg` (accent when unset), so it reads
+    // as one object, not a filled label with loose parts beside it. Every
+    // tab reserves the chip's padding, so switching tabs never moves the
+    // others. One row, no dividers: the chip is the separation. Half
+    // blocks are in every terminal font, unlike powerline glyphs.
+    Pill,
 };
 
 struct TabStrip {
@@ -120,6 +127,10 @@ struct TabStrip {
         // is the part a host doing this itself gets wrong.
         std::string detail;
         Color        detail_color = Color::slot(ThemeSlot::Muted);
+        // Detail in several colours (e.g. "+12" green, "−3" red), joined by
+        // spaces. Used instead of `detail` when non-empty. Dimmed on idle
+        // tabs under Pill, so the active chip stays the loudest thing.
+        std::vector<std::pair<std::string, Color>> parts;
     };
 
     std::vector<Tab> tabs;
@@ -133,7 +144,7 @@ struct TabStrip {
     int              gap = 3;
 
     TabStrip& tab(std::string label) {
-        tabs.push_back({std::move(label), {}, {}, {}, {}});
+        tabs.push_back({std::move(label), {}, {}, {}, {}, {}});
         return *this;
     }
     // Attach a status dot to the most recently added tab.
@@ -152,6 +163,11 @@ struct TabStrip {
         }
         return *this;
     }
+    // Add one coloured piece to the most recently added tab's detail.
+    TabStrip& part(std::string text, Color c) {
+        if (!tabs.empty() && !text.empty()) tabs.back().parts.emplace_back(std::move(text), c);
+        return *this;
+    }
     TabStrip& active(int i)          { active_index = i; return *this; }
     TabStrip& marker(TabMark m)      { mark = m;         return *this; }
 
@@ -167,7 +183,8 @@ struct TabStrip {
         // A filled tab is a CHIP, so it also carries a column of air on
         // each side; that padding has to be in the arithmetic or the strip
         // scrolls by the wrong amount and pushes the active tab off-edge.
-        const bool chip = theme.active_bg.has_value();
+        const bool pill = mark == TabMark::Pill;
+        const bool chip = theme.active_bg.has_value() && !pill;
         // Capture BY VALUE. This lambda is copied into the component closure
         // below, which outlives build() — and `mark` is a member of the
         // TabStrip, so a [&] capture left it reading a reference to an
@@ -176,12 +193,19 @@ struct TabStrip {
         // different scroll window between renders of identical input, so the
         // same tab row came out starting at "Models" on one frame and
         // "Smart" on the next.
-        auto tab_width = [chip, mark = mark](const Tab& t, bool on) {
+        auto detail_width = [](const Tab& t) {
+            if (t.parts.empty()) return t.detail.empty() ? 0 : unicode::str_width(t.detail);
+            int w = 0;
+            for (const auto& [s, c] : t.parts) w += unicode::str_width(s) + 1;
+            return w - 1;
+        };
+        auto tab_width = [chip, pill, mark = mark, detail_width](const Tab& t, bool on) {
             int w = unicode::str_width(t.label);
             if (!t.dot_glyph.empty()) w += unicode::str_width(t.dot_glyph) + 1;
-            if (!t.detail.empty())    w += unicode::str_width(t.detail) + 1;
+            if (const int d = detail_width(t); d > 0) w += d + (pill ? 2 : 1);
             if (mark == TabMark::Dot)    w += 2;   // "◆ " / "  "
             if (chip && on)              w += 2;   // " label "
+            if (pill)                    w += 4;   // "▐ " ... " ▌", on every tab
             return w;
         };
 
@@ -192,8 +216,8 @@ struct TabStrip {
         const int act = active_index < 0 ? 0 : (active_index >= n ? n - 1 : active_index);
 
         return component([tabs = tabs, theme = theme, mark = mark,
-                          indent = indent, gap = gap, act, n, chip,
-                          tab_width](int avail_w, int) -> Element {
+                          indent = indent, gap = gap, act, n, chip, pill,
+                          tab_width, detail_width](int avail_w, int) -> Element {
             // Clamp the MEASURE-PASS sentinel before it reaches the scroll
             // window.
             //
@@ -220,7 +244,7 @@ struct TabStrip {
             // whitespace: its tabs are PEERS, and a rule between them reads
             // as "another one of the same kind" where a gap reads as "a
             // different thing".
-            const int sep_w = mark == TabMark::Editor ? 5 : gap;
+            const int sep_w = mark == TabMark::Editor ? 5 : pill ? 1 : gap;
             auto span = [&](int lo, int hi) {
                 int t = 0;
                 for (int i = lo; i <= hi; ++i)
@@ -259,6 +283,40 @@ struct TabStrip {
             for (int i = start; i < n; ++i) {
                 const auto& t = tabs[static_cast<std::size_t>(i)];
                 const bool on = (i == act);
+                if (pill) {
+                    if (i > start) put(" ", Style{});
+                    const Color fill = theme.active_bg.value_or(theme.accent);
+                    // Inside the chip everything shares its fill. No fill set:
+                    // the ends alone mark it, as brackets in the accent.
+                    const bool filled = theme.active_bg.has_value();
+                    const Style base = on && filled ? Style{}.with_bg(fill) : Style{};
+                    // The ends are half blocks in the fill colour over the
+                    // surface, so the chip's sides read rounded.
+                    put(on ? (filled ? "\xe2\x96\x90" : "\xe2\x9d\xae") : " ", Style{}.with_fg(fill));   // ▐ or ❮
+                    put(" ", base);
+                    if (!t.dot_glyph.empty()) {
+                        put(t.dot_glyph, base.with_fg(t.dot_color));
+                        put(" ", base);
+                    }
+                    put(t.label, on ? base.with_fg(theme.active).with_bold()
+                                    : base.with_fg(theme.idle));
+                    if (detail_width(t) > 0) {
+                        put("  ", base);
+                        if (t.parts.empty()) {
+                            put(t.detail, base.with_fg(t.detail_color).with_dim());
+                        } else {
+                            for (std::size_t k = 0; k < t.parts.size(); ++k) {
+                                if (k) put(" ", base);
+                                Style ps = base.with_fg(t.parts[k].second);
+                                if (!on) ps = ps.with_dim();
+                                put(t.parts[k].first, ps);
+                            }
+                        }
+                    }
+                    put(" ", base);
+                    put(on ? (filled ? "\xe2\x96\x8c" : "\xe2\x9d\xaf") : " ", Style{}.with_fg(fill));   // ▌ or ❯
+                    continue;
+                }
                 if (i > start) {
                     if (mark == TabMark::Editor) {
                         // "  │  " — symmetric air around the divider. The
@@ -313,7 +371,15 @@ struct TabStrip {
                     ++col;
                 }
 
-                if (!t.detail.empty()) {
+                if (!t.parts.empty()) {
+                    for (const auto& [s, c] : t.parts) {
+                        put(" ", Style{});
+                        put(s, Style{}.with_fg(c));
+                    }
+                    const int w = detail_width(t) + 1;
+                    rule_pad(w, false);
+                    col += w;
+                } else if (!t.detail.empty()) {
                     put(" ", Style{});
                     put(t.detail, Style{}.with_fg(t.detail_color).with_dim());
                     const int w = unicode::str_width(t.detail) + 1;
@@ -329,7 +395,7 @@ struct TabStrip {
             // wearing a chip: a fill plus a rule beneath it is one fact
             // claimed twice, and the rule would sit under a chip that is
             // two columns wider than its own label.
-            if (mark == TabMark::Dot || mark == TabMark::Editor || chip)
+            if (mark == TabMark::Dot || mark == TabMark::Editor || chip || pill)
                 return label_row;
 
             return v(std::move(label_row),
