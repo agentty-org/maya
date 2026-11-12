@@ -601,6 +601,7 @@ inline void set_terminal_palette(int index, LitColor rgb) noexcept {
 // left alone.
 namespace detail {
 [[nodiscard]] inline double rel_lum(const LitColor& c) noexcept {
+    if (!c.has_channels()) return 0.0;   // a slot or named colour has no RGB to weigh
     auto f = [](int v) {
         const double s = v / 255.0;
         return s <= 0.03928 ? s / 12.92 : std::pow((s + 0.055) / 1.055, 2.4);
@@ -1085,6 +1086,8 @@ inline constexpr Color rem_fg_hi = Color::hex(0xFFE8EC);
 
 inline constexpr Color hunk_bg   = Color::hex(0x1E2555);
 inline constexpr Color hunk_fg   = Color::hex(0xCEDAFF);
+// A search hit on either band: pure white, brighter than both *_fg_hi.
+inline constexpr Color hit_fg    = Color::hex(0xFFFFFF);
 }  // namespace diff_palette
 
 }  // namespace maya

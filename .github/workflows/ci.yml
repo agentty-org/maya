@@ -52,7 +52,7 @@ jobs:
             cc: clang-22
             cxx: clang++-22
           - name: macos-gcc
-            os: macos-14
+            os: macos-15
             cc: gcc-16
             cxx: g++-16
           - name: windows-msvc
@@ -139,7 +139,7 @@ jobs:
           - name: linux-clang22
             os: ubuntu-latest
           - name: macos
-            os: macos-14
+            os: macos-15
           - name: windows-msvc
             os: windows-2025
     steps:
@@ -161,7 +161,7 @@ jobs:
           echo "CXX=clang++-22" >> "$GITHUB_ENV"
       - name: Install toolchain (macOS)
         if: runner.os == 'macOS'
-        # AppleClang on macos-14 has no C++26, so maya::app's configure gate
+        # AppleClang on macOS has no C++26, so maya::app's configure gate
         # (MAYA_BUILD_APP, which vendors jaal) fails before a single example
         # compiles. Use the same gcc@16 the build+test macOS leg uses.
         run: |

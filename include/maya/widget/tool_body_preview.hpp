@@ -1250,7 +1250,7 @@ private:
             : Style{}.with_fg(Color::slot(ThemeSlot::Success));
         // Needle hits brighten + bold inside the band; bg stays put.
         const Style hit_st = bands
-            ? Style{}.with_bg(add_bg).with_fg(Color::hex(0xFFFFFF)).with_bold()
+            ? Style{}.with_bg(add_bg).with_fg(diff_palette::hit_fg).with_bold()
             : Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_bold();
 
         std::vector<Element> rows;
@@ -2061,7 +2061,7 @@ private:
         // Needle hits stay INSIDE the band: brighten + bold the span, never
         // change its bg, so the red/green rectangle stays unbroken.
         const Style hit_st = bands
-            ? Style{}.with_bg(bg).with_fg(Color::hex(0xFFFFFF)).with_bold()
+            ? Style{}.with_bg(bg).with_fg(diff_palette::hit_fg).with_bold()
             : Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_bold();
 
         std::string gutter = " ";
@@ -2173,10 +2173,10 @@ private:
         // Needle hits ride the same band, brightened + bold, so the span the
         // tool searched for pops without breaking the red/green rectangle.
         const Style add_hit_st = bands
-            ? Style{}.with_bg(add_bg).with_fg(Color::hex(0xFFFFFF)).with_bold()
+            ? Style{}.with_bg(add_bg).with_fg(diff_palette::hit_fg).with_bold()
             : Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_bold();
         const Style rem_hit_st = bands
-            ? Style{}.with_bg(rem_bg).with_fg(Color::hex(0xFFFFFF)).with_bold()
+            ? Style{}.with_bg(rem_bg).with_fg(diff_palette::hit_fg).with_bold()
             : Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_bold();
         const Style hunk_st     = bands
             ? Style{}.with_fg(hunk_fg).with_bg(hunk_bg).with_bold()
