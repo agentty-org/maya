@@ -118,6 +118,11 @@ public:
         bool failed    = false;
         int  exit_code = 0;
 
+        // A short hint row under the body, in the warning colour: what
+        // likely went wrong and what to do ("the sandbox may have blocked
+        // this ..."). Empty = no row.
+        std::string note;
+
         // FileRead: gutter starts at this line number.
         int  start_line  = 1;
 
@@ -253,6 +258,29 @@ public:
 
     [[nodiscard]] Element build() const {
         using namespace dsl;
+        if (cfg_.note.empty()) return build_body();
+        const Style warn = Style{}.with_fg(Color::slot(ThemeSlot::Warning));
+        // The timeline gives each child row its own stripe, so the note
+        // lines are added as rows of the body, not as a nested block.
+        std::vector<Element> rows;
+        Element body = build_body();
+        if (auto* bx = as_box(body); bx && cfg_.kind != Kind::None)
+            rows = bx->children;
+        else if (cfg_.kind != Kind::None)
+            rows.push_back(std::move(body));
+        std::string_view rest = cfg_.note;
+        for (bool first = true; !rest.empty(); first = false) {
+            const auto nl = rest.find('\n');
+            rows.push_back(text((first ? "\xe2\x96\xb2 " : "  ")   // ▲
+                                    + std::string{rest.substr(0, nl)}, warn));
+            rest = nl == std::string_view::npos ? std::string_view{} : rest.substr(nl + 1);
+        }
+        return v(std::move(rows)).build();
+    }
+
+private:
+    [[nodiscard]] Element build_body() const {
+        using namespace dsl;
         switch (cfg_.kind) {
             case Kind::None:        return blank();
             case Kind::CodeBlock:   return code_block(cfg_.text, cfg_.text_color);
@@ -269,7 +297,6 @@ public:
         return blank();
     }
 
-private:
     Config cfg_;
 
     // `muted()` is the LEGIBLE-secondary tier — line gutters, footer

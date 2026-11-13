@@ -41,6 +41,9 @@ public:
         std::string verb;
         std::string lang;
         std::optional<Color> accent;
+        // Optional muted line under the description, e.g. what the command
+        // can reach.
+        std::string note;
     };
 
     explicit Permission(Config cfg) : cfg_(std::move(cfg)) {}
@@ -125,6 +128,14 @@ public:
                 pos = nl + 1;
                 ++li;
             }
+        }
+
+        if (!cfg_.note.empty()) {
+            rows.push_back(Element{TextElement{.content = ""}});
+            rows.push_back(Element{TextElement{
+                .content = "  " + cfg_.note,
+                .style = Style{}.with_fg(Color::slot(ThemeSlot::Muted)),
+            }});
         }
 
         // Spacer
