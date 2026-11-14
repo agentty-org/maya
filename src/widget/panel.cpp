@@ -1378,8 +1378,10 @@ Element Panel::build() const {
         //
         // A one-column gutter costs one column. Reflowing costs the
         // reader's place on the page.
+        ScrollbarStyle bar_style = cfg_.scrollbar_style;
+        if (bar_style.thumb_follows_accent) bar_style.thumb_color = cfg_.accent;
         Element gutter = content > vh
-            ? scrollbar_y(s, vh, cfg_.scrollbar_style)
+            ? scrollbar_y(s, vh, bar_style)
             // Same width, no ink. A full-height thumb beside a list that
             // FITS reads as a stray ┃ hugging the border and communicates
             // nothing — there is no hidden content to indicate.

@@ -234,7 +234,7 @@ struct Config {
     Color active_color = Color::slot(ThemeSlot::Accent);
 
     Theme          theme{};
-    ScrollbarStyle scrollbar_style = ScrollbarStyle::neon();
+    ScrollbarStyle scrollbar_style = ScrollbarStyle::overlay();
 };
 
 } // namespace maya::panel

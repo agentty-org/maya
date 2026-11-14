@@ -64,7 +64,35 @@ struct ScrollbarStyle {
     Color track_color = Color::slot(ThemeSlot::Muted);
     Color thumb_color = Color::slot(ThemeSlot::Muted);
 
+    /// Half-cell thumb ends for scrollbar_y. When set, the thumb moves in
+    /// half-cell steps: a cell whose lower half is thumb draws
+    /// `thumb_lower_half`, one whose upper half is thumb draws
+    /// `thumb_upper_half`. Empty = whole cells only.
+    std::string_view thumb_lower_half;
+    std::string_view thumb_upper_half;
+
+    /// A Panel paints the thumb in its own accent instead of thumb_color.
+    bool thumb_follows_accent = false;
+
     // -- Presets ------------------------------------------------------------
+
+    /// For overlay panels: no track line (beside a border it reads as a
+    /// second border), and a right-half block thumb in the panel's accent
+    /// that moves in half cells. A block can't be mistaken for a content
+    /// rail (┃) the way a heavy line can.
+    [[nodiscard]] static ScrollbarStyle overlay() {
+        return {
+            .track_glyph = " ",
+            .thumb_glyph = "\xe2\x96\x90",                 // ▐ right half block
+            .track_glyph_h = " ",
+            .thumb_glyph_h = "\xe2\x96\x84",               // ▄
+            .track_color = Color::slot(ThemeSlot::Muted),
+            .thumb_color = Color::slot(ThemeSlot::Primary),
+            .thumb_lower_half = "\xe2\x96\x97",            // ▗ lower right quadrant
+            .thumb_upper_half = "\xe2\x96\x9d",            // ▝ upper right quadrant
+            .thumb_follows_accent = true,
+        };
+    }
 
     /// Default — thin line track, heavy line thumb. Dim throughout.
     [[nodiscard]] static ScrollbarStyle line() { return {}; }
@@ -287,17 +315,50 @@ struct ScrollbarStyle {
         }};
     };
 
-    // Stack three segments: track-before-thumb, thumb, track-after-thumb.
-    // Filter empties so dsl::v doesn't reserve a row for an empty text node.
     std::vector<Element> parts;
-    parts.reserve(3);
-    if (thumb_y > 0)
-        parts.push_back(seg(style.track_glyph, style.track_color, thumb_y));
-    if (thumb_h > 0)
-        parts.push_back(seg(style.thumb_glyph, style.thumb_color, thumb_h));
-    const int after = viewport_h - thumb_y - thumb_h;
-    if (after > 0)
-        parts.push_back(seg(style.track_glyph, style.track_color, after));
+    if (!style.thumb_lower_half.empty() && !style.thumb_upper_half.empty()) {
+        // Half-cell placement. The size stays whole cells (thumb_h, the
+        // same number drag uses); only the position gets half steps.
+        const int halves   = viewport_h * 2;
+        // At least a cell and a half, so a long list still shows a thumb
+        // you can find at a glance.
+        const int t_len    = std::min(halves, std::max(3, thumb_h * 2));
+        const int t_pos    = s.max_y > 0
+            ? std::clamp((halves - t_len) * s.y / s.max_y, 0, halves - t_len) : 0;
+        auto in = [&](int h) { return h >= t_pos && h < t_pos + t_len; };
+        // Runs of the same glyph become one segment.
+        std::string_view run_g;
+        bool run_thumb = false;
+        int  run_n = 0;
+        auto flush = [&] {
+            if (run_n > 0)
+                parts.push_back(seg(run_g, run_thumb ? style.thumb_color
+                                                     : style.track_color, run_n));
+            run_n = 0;
+        };
+        for (int i = 0; i < viewport_h; ++i) {
+            const bool up = in(2 * i), down = in(2 * i + 1);
+            const std::string_view g = up && down ? style.thumb_glyph
+                                     : down       ? style.thumb_lower_half
+                                     : up         ? style.thumb_upper_half
+                                                  : style.track_glyph;
+            const bool thumb = up || down;
+            if (run_n > 0 && (g != run_g || thumb != run_thumb)) flush();
+            run_g = g; run_thumb = thumb; ++run_n;
+        }
+        flush();
+    } else {
+        // Stack three segments: track-before-thumb, thumb, track-after-thumb.
+        // Filter empties so dsl::v doesn't reserve a row for an empty text node.
+        parts.reserve(3);
+        if (thumb_y > 0)
+            parts.push_back(seg(style.track_glyph, style.track_color, thumb_y));
+        if (thumb_h > 0)
+            parts.push_back(seg(style.thumb_glyph, style.thumb_color, thumb_h));
+        const int after = viewport_h - thumb_y - thumb_h;
+        if (after > 0)
+            parts.push_back(seg(style.track_glyph, style.track_color, after));
+    }
 
     // Tag with VerticalBar role + state ptr so the renderer's writeback
     // records bar_v_bounds (for future drag-to-scroll / hover features).
