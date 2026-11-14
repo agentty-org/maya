@@ -58,6 +58,7 @@
 #include "../core/render_context.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -551,11 +552,179 @@ struct ViewportOpts {
     // Flow::Column (columns are independent by design). Default off so the
     // primitive stays purely additive.
     bool equal_rows = false;
+    // Size columns to their CONTENT instead of splitting evenly (Row flow).
+    // Each cell is measured at two wide offers: one that keeps its width is
+    // rigid (text, a donut) and gets its natural width; one that grows with
+    // the offer is elastic (a histogram, a line chart) and shares the space
+    // left over. If the row is all rigid, the leftover is split evenly so it
+    // reads as even spacing. A row that can't fit its cells takes fewer.
+    // max_width is not used; min_width is an elastic cell's floor and the
+    // least a rigid cell is squeezed to.
+    bool fit = false;
+    // With fit: when a row has nothing elastic, hand the spare width to
+    // the cells so the row spans the slot. Off packs cells at their natural
+    // width, which a viewport nested inside another must do, or it inks
+    // the whole offer and the outer one sees it as elastic.
+    bool spread = true;
+    // With fit: the host's content key. The plan (how many per row, each
+    // width) costs a few trial paints per cell, so it is kept per
+    // (fit_key, width) and reused until either changes. Change the key when
+    // the cells' content changes in a way that could move a width. 0 means
+    // no caching: the plan is worked out on every call.
+    std::uint64_t fit_key = 0;
 };
 
 /// Cells split EVENLY BY COUNT into 1/2/3/… columns chosen from a width
 /// ceiling, round-robin so reading order is preserved, every column stays
 /// responsive to its own width.
+namespace detail {
+
+// ViewportOpts::fit. Widths come from measuring the real cells.
+struct FitPlan { int k = 1; std::vector<int> want; std::vector<char> elastic; };
+
+[[nodiscard]] inline FitPlan plan_fit(const std::vector<Element>& cells,
+                                     const ViewportOpts& opts, int w) {
+    const int n     = static_cast<int>(cells.size());
+    const int gap   = std::max(0, opts.gap);
+    const int floor = std::max(1, opts.min_width);
+    // A cell that keeps inking edge to edge on a canvas far wider than the
+    // slot stretches (a chart). Anything else, text even when it wraps at
+    // the slot, stops at its own length and has a natural width.
+    std::vector<int>  want(static_cast<std::size_t>(n));
+    std::vector<char> elastic(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i) {
+        const auto& cell = cells[static_cast<std::size_t>(i)];
+        const int big = std::max(400, 2 * w);
+        const bool fills = painted_width(cell, big) >= big - 1;
+        elastic[static_cast<std::size_t>(i)] = fills;
+        int a = fills ? floor : painted_width(cell, w);
+        if (!fills) {
+            // The cell's width is the smallest at which it keeps the layout
+            // it has at the full slot: as short, and inking as much. Ink
+            // alone is too tight: a card's right padding isn't ink (text
+            // wraps), and a donut needs room past its legend to keep the
+            // legend beside the ring. Binary search: wider never hurts.
+            const int h_full = measure_element(cell, w).height.value;
+            auto keeps = [&](int x) {
+                return measure_element(cell, x).height.value <= h_full
+                    && painted_width(cell, x) >= a;
+            };
+            // The slack a cell needs past its ink is small (padding, a
+            // legend's margin), so search a short window, not the slot.
+            int lo = a, hi = std::min(w, a + 12);
+            if (!keeps(hi)) hi = lo = w;
+            while (lo < hi) {
+                const int mid = lo + (hi - lo) / 2;
+                if (keeps(mid)) hi = mid; else lo = mid + 1;
+            }
+            a = lo;
+        }
+        want[static_cast<std::size_t>(i)] = fills ? floor : std::max(1, a);
+    }
+
+    // The most cells per row such that every row fits what it wants.
+    int k = opts.max_cols > 0 ? std::min(n, opts.max_cols) : n;
+    for (; k > 1; --k) {
+        bool ok = true;
+        for (int s = 0; s < n && ok; s += k) {
+            int sum = gap * (std::min(n, s + k) - s - 1);
+            for (int i = s; i < std::min(n, s + k); ++i) sum += want[static_cast<std::size_t>(i)];
+            ok = sum <= w;
+        }
+        if (ok) break;
+    }
+    return FitPlan{k, std::move(want), std::move(elastic)};
+}
+
+[[nodiscard]] inline Element fit_rows(const std::vector<Element>& cells,
+                                      const ViewportOpts& opts, int w) {
+    const int n     = static_cast<int>(cells.size());
+    const int gap   = std::max(0, opts.gap);
+    const int floor = std::max(1, opts.min_width);
+
+    // A few recent plans. Measure and paint both run this, often more than
+    // once a frame, and the plan only moves when the content or width does.
+    struct Entry { std::uint64_t key; int w, n; FitPlan plan; };
+    thread_local std::vector<Entry> cache;
+    FitPlan local;
+    const FitPlan* hit = nullptr;
+    if (opts.fit_key == 0) {
+        local = plan_fit(cells, opts, w);
+        hit = &local;
+    } else {
+        for (auto& e : cache)
+            if (e.key == opts.fit_key && e.w == w && e.n == n) { hit = &e.plan; break; }
+        if (!hit) {
+            if (cache.size() >= 16) cache.erase(cache.begin());
+            cache.push_back(Entry{opts.fit_key, w, n, plan_fit(cells, opts, w)});
+            hit = &cache.back().plan;
+        }
+    }
+    const int k = hit->k;
+    const auto& want = hit->want;
+    const auto& elastic = hit->elastic;
+
+    std::vector<Element> rows;
+    for (int s = 0; s < n; s += k) {
+        const int e = std::min(n, s + k), m = e - s;
+        const int span = std::max(m, w - gap * (m - 1));
+        std::vector<int> cw(static_cast<std::size_t>(m));
+        int used = 0, n_el = 0;
+        for (int i = 0; i < m; ++i) {
+            cw[static_cast<std::size_t>(i)] = want[static_cast<std::size_t>(s + i)];
+            used += cw[static_cast<std::size_t>(i)];
+            n_el += elastic[static_cast<std::size_t>(s + i)] ? 1 : 0;
+        }
+        if (used > span) {
+            // Too wide (a lone cell, or k hit 1): squeeze the rigid cells
+            // toward the floor in proportion to what they have over it.
+            int over = used - span, slack = 0;
+            for (int i = 0; i < m; ++i) slack += std::max(0, cw[static_cast<std::size_t>(i)] - floor);
+            for (int i = 0; i < m && slack > 0; ++i) {
+                auto& c = cw[static_cast<std::size_t>(i)];
+                const int give = std::max(0, c - floor);
+                const int take = std::min(give, (over * give + slack - 1) / slack);
+                c -= take;
+            }
+            used = 0;
+            for (int v : cw) used += v;
+            for (int i = m - 1; i >= 0 && used > span; --i) {   // rounding
+                auto& c = cw[static_cast<std::size_t>(i)];
+                const int t = std::min(used - span, c - 1);
+                c -= t; used -= t;
+            }
+        } else if (used < span && (n_el > 0 || opts.spread)) {
+            // Leftover goes to the elastic cells, else evenly to everyone.
+            const int left = span - used;
+            const int share_n = n_el > 0 ? n_el : m;
+            int given = 0, seen = 0;
+            for (int i = 0; i < m; ++i) {
+                if (n_el > 0 && !elastic[static_cast<std::size_t>(s + i)]) continue;
+                ++seen;
+                const int add = left * seen / share_n - given;
+                cw[static_cast<std::size_t>(i)] += add;
+                given += add;
+            }
+        }
+        std::vector<Element> in_row;
+        for (int i = 0; i < m; ++i) {
+            auto cb = vstack();
+            cb.width(Dimension::fixed(cw[static_cast<std::size_t>(i)]));
+            cb.max_width(Dimension::fixed(cw[static_cast<std::size_t>(i)]));
+            in_row.push_back(cb(cells[static_cast<std::size_t>(s + i)]));
+        }
+        auto rb = hstack();
+        if (gap > 0) rb.gap(gap);
+        rows.push_back(rb(std::move(in_row)));
+    }
+    if (rows.size() == 1) return std::move(rows.front());
+    auto colb = vstack();
+    if (opts.gap_y > 0) colb.gap(opts.gap_y);
+    return colb(std::move(rows));
+}
+
+} // namespace detail
+
 [[nodiscard]] inline auto viewport(std::vector<Element> cells, ViewportOpts opts)
     -> ComponentBuilder
 {
@@ -563,6 +732,8 @@ struct ViewportOpts {
         const int w = opts.width > 0 ? std::min(offered, opts.width) : offered;
         const int n = static_cast<int>(cells.size());
         if (n == 0) return Element{ElementList{}};
+        if (opts.fit && opts.flow == Flow::Row)
+            return detail::fit_rows(cells, opts, w);
 
         const int gap  = std::max(0, opts.gap);
         const int most = std::max(1, opts.max_width);

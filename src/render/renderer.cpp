@@ -120,6 +120,26 @@ void render_tree(
     render_tree(root, canvas, pool, theme, layout_nodes, auto_height);
 }
 
+int painted_width(const Element& elem, int max_width, int max_height)
+{
+    if (max_width <= 0) return 0;
+    // As tall as the content, not max_height: clearing and diffing a tall
+    // scratch canvas was most of the cost.
+    const int h = std::clamp(measure_element(elem, max_width, max_height).height.value, 1,
+                             std::max(1, max_height));
+    // Its own canvas, pool and render context, so a probe from inside a
+    // component's render never touches the frame being drawn.
+    StylePool pool;
+    Canvas scratch(max_width, h, &pool);
+    scratch.clear();
+    render_tree(elem, scratch, pool, theme::live(), /*auto_height=*/true);
+    int w = 0;
+    const int rows = std::min(scratch.max_content_row() + 1, scratch.height());
+    for (int y = 0; y < rows; ++y)
+        w = std::max(w, scratch.last_content_col(y) + 1);
+    return std::min(w, max_width);
+}
+
 void render_tree(
     const Element& root,
     Canvas& canvas,

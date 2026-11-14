@@ -50,6 +50,9 @@ render/wire_row.hpp: thread_local
 platform/posix/terminal.hpp: thread_local
 platform/macos/terminal.hpp: thread_local
 widget/markdown/parser_internal.hpp: thread_local
+# viewport fit: recent column plans, keyed by the host's content key and
+# width. Called from layout with no kernel in scope.
+element/grid.hpp: thread_local
 
 # ── P2. Immutable publish behind an atomic ───────────────────────────────
 # The markdown palette and the theme were 35+ plain mutable globals written

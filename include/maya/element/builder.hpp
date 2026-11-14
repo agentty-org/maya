@@ -565,6 +565,17 @@ namespace detail {
                                    int max_width,
                                    int max_height = 1 << 20);
 
+// painted_width() - The columns `elem` actually INKS when given `max_width`
+// ============================================================================
+// measure_element() reports a component as wide as its offer, because a
+// component's size is whatever it is handed. This paints into a scratch
+// canvas instead and returns the rightmost column with content, so a donut
+// or a column of text reports its real width and a chart that stretches
+// reports the whole offer. One full paint: use it for layout decisions on
+// a handful of cells, not per row. Defined in renderer.cpp.
+[[nodiscard]] int painted_width(const Element& elem, int max_width,
+                                int max_height = 400);
+
 namespace detail {
 
 // ============================================================================
