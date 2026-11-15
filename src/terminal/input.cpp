@@ -232,8 +232,8 @@ auto InputParser::feed(std::string_view bytes) -> std::vector<Event> {
                 const std::size_t before = events.size();
                 const int acks_before = acks_;
                 // tmux with extended-keys on re-encodes what a terminal
-                // sends: ESC ] arrives as CSI 27;3;93 ~ (Alt+]) and ESC \
-                // as CSI 27;3;92 ~ (Alt+\). Followed by a clipboard reply
+                // sends: ESC ] arrives as CSI 27;3;93 ~ (Alt+]) and
+                // ESC \ as CSI 27;3;92 ~ (Alt+\). Followed by a clipboard reply
                 // ("5522;" / "52;"), it is that reply's OSC opener, not a
                 // key: read it as one, or the reply is typed in as text.
                 if (buf_ == "\x1b[27;3;93~") {
