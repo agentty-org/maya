@@ -684,7 +684,7 @@ TEST_CASE("theme: a swap survives the fullscreen double-buffer too") {
     std::string out1;
     RenderPipeline<stage::Idle>::start(back, pool, slot, out1)
         .clear().paint(Element{tree()}.build())
-        .open_frame(false).write_diff(front);
+        .open_frame(false).write_diff(front).close_frame(false);
     assert(out1.find("48;2;17;34;51") != std::string::npos);
 
     std::swap(front, back);         // present
@@ -700,7 +700,7 @@ TEST_CASE("theme: a swap survives the fullscreen double-buffer too") {
     std::string out2;
     RenderPipeline<stage::Idle>::start(back, pool, slot, out2)
         .clear().paint(Element{tree()}.build())
-        .open_frame(false).write_diff(front);
+        .open_frame(false).write_diff(front).close_frame(false);
     assert(out2.find("48;2;250;251;252") != std::string::npos);
     assert(out2.find("48;2;17;34;51") == std::string::npos);
 
