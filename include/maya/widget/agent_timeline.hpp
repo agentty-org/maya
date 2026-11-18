@@ -531,28 +531,36 @@ private:
         // transcript, ending on the answer.
         if (!has_kids || !is_terminal) push_body();
 
-        // Nested children: each one is a full event block (header + body),
-        // built by this same function, then prefixed with the parent's
-        // stripe so it reads as "inside" this card. Terminal children are
-        // static; a running child gets the live frame for its spinner.
+        // Nested children: ONE quiet row per call (status icon, tool name in
+        // its hue, detail dimmed and clipped), under the parent's stripe so
+        // it reads as "inside" this card. Deliberately not a full event
+        // block: no chip, no band, no body -- each call costs exactly one
+        // row, so the live card grows a row at a time and never jumps.
         if (has_kids) {
             const Style dim_st = Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_dim();
             if (ev.children_hidden > 0)
                 out.push_back((h(body_rule,
-                                 text("   \xe2\x8b\xaf " + std::to_string(ev.children_hidden)
+                                 text("\xe2\x8b\xaf " + std::to_string(ev.children_hidden)
                                       + " earlier", dim_st))
                                | grow(1.0f)).build());
             for (const auto& kid : *ev.children) {
-                const bool kid_terminal = kid.status == AgentEventStatus::Done
-                                       || kid.status == AgentEventStatus::Failed
-                                       || kid.status == AgentEventStatus::Rejected;
-                std::vector<Element> kid_rows;
-                build_event_body(kid_rows, kid, kid_terminal, kid_terminal ? 0 : frame, glyph);
-                for (auto& r : kid_rows)
-                    out.push_back((h(body_rule, std::move(r)) | grow(1.0f)).build());
+                const bool kid_active = kid.status == AgentEventStatus::Pending
+                                     || kid.status == AgentEventStatus::Running;
+                const Style name_st = Style{}.with_fg(kid.category_color).with_bold();
+                const Style kd_st = kid.status == AgentEventStatus::Failed
+                    ? Style{}.with_fg(Color::slot(ThemeSlot::Error)).with_dim()
+                    : dim_st;
+                out.push_back((h(
+                    body_rule,
+                    status_icon(kid.status, kid_active ? frame : 0),
+                    text(" "),
+                    text(kid.name, name_st) | nowrap | shrink(0.0f),
+                    text("  "),
+                    h(detail_text(kid.detail, kd_st)) | shrink(1.0f)
+                ) | grow(1.0f)).build());
             }
             if (is_terminal && ev.body.kind != ToolBodyPreview::Kind::None) {
-                out.push_back((h(body_rule, text("   \xe2\x94\x80\xe2\x94\x80 report", dim_st))
+                out.push_back((h(body_rule, text("\xe2\x94\x80\xe2\x94\x80 report", dim_st))
                                | grow(1.0f)).build());
                 push_body();
             }
