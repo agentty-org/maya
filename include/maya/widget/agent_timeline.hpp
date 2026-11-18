@@ -106,6 +106,14 @@ struct AgentTimelineEvent {
     // Default empty → every frame walks the event sub-tree, matching
     // the pre-cache behaviour for callers that haven't opted in.
     CacheId                 hash_id;
+
+    // A subagent's OWN tool calls, drawn as real tool cards nested inside
+    // this one's body (same chip, status icon and body widget, indented one
+    // level under this event's stripe). Shared so a deep event list costs
+    // a ref-bump to copy. Rendered after `body`.
+    std::shared_ptr<const std::vector<AgentTimelineEvent>> children;
+    // "⋯ 14 earlier" above the children, when the host trimmed older ones.
+    int children_hidden = 0;
 };
 
 struct AgentTimelineStat {
@@ -347,12 +355,15 @@ private:
                 comp.render = [name = ev.name, detail = ev.detail,
                                cc = ev.category_color, status = ev.status,
                                body = ev.body_shared,
+                               kids = ev.children, kids_hidden = ev.children_hidden,
                                glyph_copy = std::move(glyph)]
                               (int /*w*/, int /*h*/) -> Element {
                     AgentTimelineEvent e;
                     e.name = name; e.detail = detail;
                     e.category_color = cc; e.status = status;
                     e.body = *body;   // materialized ONLY on a cache miss
+                    e.children = kids;
+                    e.children_hidden = kids_hidden;
                     std::vector<Element> sub;
                     sub.reserve(4);
                     build_event_body(sub, e, /*is_terminal=*/true,
@@ -502,15 +513,49 @@ private:
         // Body rows sit on a panel a shade off the canvas, faintly tinted
         // with the row's hue. Diff bands carry their own bg and win over it.
         const Color panel = panel_bg(ev.status, ev.category_color);
-        Element body_el = ToolBodyPreview{ev.body}.build();
-        if (auto* bx = as_box(body_el)) {
-            for (const auto& child : bx->children)
-                out.push_back((h(body_rule,
-                                 h(child) | bgc(panel) | grow(1.0f))
+        auto push_body = [&] {
+            Element body_el = ToolBodyPreview{ev.body}.build();
+            if (auto* bx = as_box(body_el)) {
+                for (const auto& child : bx->children)
+                    out.push_back((h(body_rule,
+                                     h(child) | bgc(panel) | grow(1.0f))
+                                   | grow(1.0f)).build());
+            } else if (auto* t = as_text(body_el); t && !t->content.empty()) {
+                out.push_back((h(body_rule, h(body_el) | bgc(panel) | grow(1.0f))
                                | grow(1.0f)).build());
-        } else if (auto* t = as_text(body_el); t && !t->content.empty()) {
-            out.push_back((h(body_rule, h(body_el) | bgc(panel) | grow(1.0f))
-                           | grow(1.0f)).build());
+            }
+        };
+        const bool has_kids = ev.children && !ev.children->empty();
+        // Running: status first (what it is doing now), work below it.
+        // Settled: the work, then its report -- read top to bottom like a
+        // transcript, ending on the answer.
+        if (!has_kids || !is_terminal) push_body();
+
+        // Nested children: each one is a full event block (header + body),
+        // built by this same function, then prefixed with the parent's
+        // stripe so it reads as "inside" this card. Terminal children are
+        // static; a running child gets the live frame for its spinner.
+        if (has_kids) {
+            const Style dim_st = Style{}.with_fg(Color::slot(ThemeSlot::Text)).with_dim();
+            if (ev.children_hidden > 0)
+                out.push_back((h(body_rule,
+                                 text("   \xe2\x8b\xaf " + std::to_string(ev.children_hidden)
+                                      + " earlier", dim_st))
+                               | grow(1.0f)).build());
+            for (const auto& kid : *ev.children) {
+                const bool kid_terminal = kid.status == AgentEventStatus::Done
+                                       || kid.status == AgentEventStatus::Failed
+                                       || kid.status == AgentEventStatus::Rejected;
+                std::vector<Element> kid_rows;
+                build_event_body(kid_rows, kid, kid_terminal, kid_terminal ? 0 : frame, glyph);
+                for (auto& r : kid_rows)
+                    out.push_back((h(body_rule, std::move(r)) | grow(1.0f)).build());
+            }
+            if (is_terminal && ev.body.kind != ToolBodyPreview::Kind::None) {
+                out.push_back((h(body_rule, text("   \xe2\x94\x80\xe2\x94\x80 report", dim_st))
+                               | grow(1.0f)).build());
+                push_body();
+            }
         }
     }
 
