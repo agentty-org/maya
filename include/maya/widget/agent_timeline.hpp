@@ -53,6 +53,7 @@ enum class AgentEventStatus : std::uint8_t {
     Done,       // success → bright_green ✓
     Failed,     // exception or non-zero exit → bright_red ✗
     Rejected,   // user denied permission → bright_yellow ⊘
+    Cancelled,  // the user stopped it (Esc) → muted ⊘, nothing went wrong
 };
 
 struct AgentTimelineEvent {
@@ -319,7 +320,8 @@ private:
         const bool is_last   = (i + 1 == cfg_.events.size());
         const bool is_terminal = (ev.status == AgentEventStatus::Done
                                || ev.status == AgentEventStatus::Failed
-                               || ev.status == AgentEventStatus::Rejected);
+                               || ev.status == AgentEventStatus::Rejected
+                               || ev.status == AgentEventStatus::Cancelled);
 
         if (is_terminal && !ev.hash_id.empty()) {
             ComponentElement comp;
@@ -546,16 +548,21 @@ private:
             for (const auto& kid : *ev.children) {
                 const bool kid_active = kid.status == AgentEventStatus::Pending
                                      || kid.status == AgentEventStatus::Running;
-                const Style name_st = Style{}.with_fg(kid.category_color).with_bold();
+                const Style name_st = kid.status == AgentEventStatus::Cancelled
+                    ? Style{}.with_fg(Color::slot(ThemeSlot::Muted)).with_bold()
+                    : Style{}.with_fg(kid.category_color).with_bold();
                 const Style kd_st = kid.status == AgentEventStatus::Failed
                     ? Style{}.with_fg(Color::slot(ThemeSlot::Error)).with_dim()
                     : dim_st;
+                // The rule and icon never shrink: in a narrow terminal the
+                // detail gives way (clipped with an ellipsis) instead of the
+                // whole row sliding left out of line with its neighbours.
                 out.push_back((h(
-                    body_rule,
-                    status_icon(kid.status, kid_active ? frame : 0),
-                    text(" "),
+                    h(body_rule) | shrink(0.0f),
+                    status_icon(kid.status, kid_active ? frame : 0) | shrink(0.0f),
+                    text(" ") | shrink(0.0f),
                     text(kid.name, name_st) | nowrap | shrink(0.0f),
-                    text("  "),
+                    text("  ") | shrink(0.0f),
                     h(detail_text(kid.detail, kd_st)) | shrink(1.0f)
                 ) | grow(1.0f)).build());
             }
@@ -579,6 +586,8 @@ private:
             return Style{}.with_fg(Color::slot(ThemeSlot::Error)).with_bold();
         if (s == AgentEventStatus::Rejected)
             return Style{}.with_fg(Color::slot(ThemeSlot::Warning)).with_bold();
+        if (s == AgentEventStatus::Cancelled)
+            return Style{}.with_fg(Color::slot(ThemeSlot::Muted)).with_bold();
         return is_active ? Style{}.with_fg(cat).with_bold()
                          : Style{}.with_fg(cat).with_dim();
     }
@@ -759,6 +768,9 @@ private:
             case AgentEventStatus::Rejected:
                 return dsl::text(std::string_view{"\xe2\x8a\x98"},
                                  Style{}.with_fg(Color::slot(ThemeSlot::Warning)).with_bold());
+            case AgentEventStatus::Cancelled:
+                return dsl::text(std::string_view{"\xe2\x8a\x98"},
+                                 Style{}.with_fg(Color::slot(ThemeSlot::Muted)).with_bold());
         }
         return dsl::text(std::string_view{"\xe2\x97\x8b"},
                          Style{}.with_fg(Color::slot(ThemeSlot::Muted)));
@@ -811,6 +823,7 @@ private:
         switch (s) {
             case AgentEventStatus::Failed:   return Color::slot(ThemeSlot::Error);
             case AgentEventStatus::Rejected: return Color::slot(ThemeSlot::Warning);
+            case AgentEventStatus::Cancelled: return Color::slot(ThemeSlot::Muted);
             case AgentEventStatus::Running:  return Color::slot(ThemeSlot::Primary);
             case AgentEventStatus::Pending:
             case AgentEventStatus::Done:     return Color::slot(ThemeSlot::Muted);
