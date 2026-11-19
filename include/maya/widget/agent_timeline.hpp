@@ -115,6 +115,11 @@ struct AgentTimelineEvent {
     std::shared_ptr<const std::vector<AgentTimelineEvent>> children;
     // "⋯ 14 earlier" above the children, when the host trimmed older ones.
     int children_hidden = 0;
+    // While running: lines drawn UNDER the children (what the agent is
+    // writing right now, newest last), one row each, clipped. Lets the
+    // outcome type out beneath the calls it came from instead of landing
+    // in one go when the run ends. Empty = none.
+    std::vector<std::string> trailer;
 };
 
 struct AgentTimelineStat {
@@ -571,6 +576,17 @@ private:
                                | grow(1.0f)).build());
                 push_body();
             }
+        }
+        // Running: what the agent is writing, under its calls.
+        if (!is_terminal && !ev.trailer.empty()) {
+            const Style said_st = Style{}.with_fg(Color::slot(ThemeSlot::Text));
+            const Style mark_st = Style{}.with_fg(ev.category_color).with_dim();
+            for (const auto& line : ev.trailer)
+                out.push_back((h(
+                    h(body_rule) | shrink(0.0f),
+                    text("\xe2\x96\xb8 ", mark_st) | shrink(0.0f),   // ▸
+                    text(line, said_st) | clip | shrink(1.0f)
+                ) | grow(1.0f)).build());
         }
     }
 
