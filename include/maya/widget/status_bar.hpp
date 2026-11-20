@@ -40,7 +40,7 @@
 #include "../style/color.hpp"
 
 #include "context_gauge.hpp"
-#include "cache_chip.hpp"
+#include "cache_gauge.hpp"
 #include "phase_accent.hpp"
 #include "phase_chip.hpp"
 #include "status_banner.hpp"
@@ -83,8 +83,8 @@ public:
         ContextGauge::Config         context;          // max=0 = hide
         // Prompt-cache verdict, just left of the ctx gauge. state=Hidden =
         // hide. Sheds after the sparkline (its detail first, before even the
-        // ctx token counts), and before the phase or gauge ever do.
-        CacheChip::Config            cache;
+        // ctx token counts), and before the phase or the ctx gauge ever do.
+        CacheGauge::Config           cache;
 
         // Status row — takes over the activity_row slot when present.
         StatusBanner::Config         status_banner;
@@ -189,7 +189,7 @@ private:
             // fits. No thresholds, no estimates — a relabeled model
             // badge or a longer verb re-decides by itself. Shed order
             // (first → last): cache detail · ctx token counts ·
-            // token-stream chip · cache chip · phase elapsed · ctx bar ·
+            // token-stream chip · cache gauge · phase elapsed · ctx bar ·
             // phase verb · ctx gauge · model badge. The breadcrumb (most
             // expendable of all) is added LAST from whatever measured
             // leftover remains.
@@ -249,11 +249,11 @@ private:
                     rparts.push_back(cfg.model_badge);
                     emitted_right = true;
                 }
-                if (s.cache && cfg.cache.state != CacheChip::State::Hidden) {
-                    CacheChip::Config cc = cfg.cache;
+                if (s.cache && cfg.cache.state != CacheGauge::State::Hidden) {
+                    CacheGauge::Config cc = cfg.cache;
                     cc.detail = s.cdetail;
                     sep();
-                    rparts.push_back(CacheChip{cc}.build());
+                    rparts.push_back(CacheGauge{cc}.build());
                     emitted_right = true;
                 }
                 if (cfg.context.max > 0 && s.gauge) {

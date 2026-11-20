@@ -1,5 +1,5 @@
 #pragma once
-// maya::widget::CacheChip — the prompt cache, legible at a glance.
+// maya::widget::CacheGauge — the prompt cache, legible at a glance.
 //
 // A provider's prompt (KV) cache is the difference between re-reading a
 // 100k-token prefix in milliseconds and re-pricing it cold, which is 10-20x
@@ -16,9 +16,10 @@
 //   CACHE n/a             Unreported — the provider says nothing about it
 //
 // Same typography as ContextGauge (bold muted label, value carries the
-// colour) so the two read as one family on the status bar. `detail` adds the
-// trailing token/idle field; the status bar sheds it first under width
-// pressure, then the whole chip.
+// colour, no background, no edge bar) — it is the gauge's neighbour and reads
+// as one readout with it, not as a chip. `detail` adds the trailing
+// token/idle field; the status bar sheds it first under width pressure, then
+// the whole gauge.
 
 #include <algorithm>
 #include <cstdint>
@@ -35,7 +36,7 @@
 
 namespace maya {
 
-class CacheChip {
+class CacheGauge {
 public:
     enum class State : std::uint8_t {
         Hidden,       // nothing to say (no data yet, or a prefix too small to cache)
@@ -54,7 +55,7 @@ public:
         bool  detail    = true; // false → label + verdict only (narrow rungs)
     };
 
-    explicit CacheChip(Config c) : cfg_(c) {}
+    explicit CacheGauge(Config c) : cfg_(c) {}
     operator Element() const { return build(); }
 
     [[nodiscard]] bool visible() const noexcept { return cfg_.state != State::Hidden; }
