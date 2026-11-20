@@ -9,21 +9,26 @@
 // a cache that should have hit and did not. The host makes that call and
 // hands this widget a verdict; the widget only draws it.
 //
-//   CACHE 94%  115k       Hit       — % of the prefix served from cache
-//   CACHE warming  +120k  Warming   — first write; expected, not a failure
-//   CACHE expired  idle 12m          — the cache outlived its TTL
-//   CACHE MISS  120k cold Miss      — should have hit; the prefix changed
-//   CACHE n/a             Unreported — the provider says nothing about it
+// One number, like the ctx gauge's percentage: how much of the prefix the
+// last request left warm was served from cache. A healthy hit is ONLY the
+// number. Anything else gets one word after it, because a number cannot say
+// whether 0% is a fresh thread or a broken cache, and colour alone is lost on
+// monochrome themes and to colour-blind eyes:
+//
+//   CACHE 94%        green   Hit        — reused (≥80% green, else plain text)
+//   CACHE 0% new     info    Warming    — expected cold: new thread, compaction,
+//                                         model switch
+//   CACHE 3% idle    dim     Expired    — the idle gap outlived the cache
+//   CACHE 2% miss    amber   Miss       — should have hit; the prefix changed
+//   CACHE n/a        dim     Unreported — the provider never says
 //
 // Same typography as ContextGauge (bold muted label, value carries the
 // colour, no background, no edge bar) — it is the gauge's neighbour and reads
-// as one readout with it, not as a chip. `detail` adds the trailing
-// token/idle field; the status bar sheds it first under width pressure, then
-// the whole gauge.
+// as one readout with it, not as a chip. Under width pressure the status bar
+// drops the word first (the colour still carries it), then the whole gauge.
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -48,11 +53,9 @@ public:
     };
 
     struct Config {
-        State state     = State::Hidden;
-        int   hit_pct   = 0;    // Hit: 0..100 of the prefix read from cache
-        int   tokens    = 0;    // Hit: read · Warming: written · Miss: re-priced cold
-        int   idle_secs = 0;    // Expired: the gap that outlived the cache
-        bool  detail    = true; // false → label + verdict only (narrow rungs)
+        State state = State::Hidden;
+        int   pct   = 0;     // 0..100 of the warm prefix served from cache
+        bool  note  = true;  // false → drop the explaining word (narrow rungs)
     };
 
     explicit CacheGauge(Config c) : cfg_(c) {}
@@ -69,70 +72,45 @@ public:
         // Like "CTX": no trailing space; each following segment owns its gap.
         parts.push_back(text("CACHE", Style{}.with_fg(muted).with_bold()));
 
-        std::string verdict, more;
-        Style vstyle;
-        switch (cfg_.state) {
-        case State::Hit: {
-            const int pct = std::clamp(cfg_.hit_pct, 0, 100);
-            verdict = " " + std::to_string(pct) + "%";
-            vstyle  = Style{}.with_fg(hit_color(pct)).with_bold();
-            if (cfg_.tokens > 0) more = " " + compact_tokens(cfg_.tokens);
-            break;
+        if (cfg_.state == State::Unreported) {
+            parts.push_back(text(" n/a", fg_dim_(muted)));
+            return h(std::move(parts)).build();
         }
+        const int pct = std::clamp(cfg_.pct, 0, 100);
+        Style vstyle;
+        const char* word = nullptr;
+        switch (cfg_.state) {
+        case State::Hit:
+            vstyle = Style{}.with_fg(hit_color(pct)).with_bold();
+            break;
         case State::Warming:
-            verdict = " warming";
-            vstyle  = Style{}.with_fg(Color::slot(ThemeSlot::Info));
-            if (cfg_.tokens > 0) more = " +" + compact_tokens(cfg_.tokens);
+            vstyle = Style{}.with_fg(Color::slot(ThemeSlot::Info));
+            word = " new";
             break;
         case State::Expired:
-            // Muted, not amber: the cache did exactly what it promised.
-            verdict = " expired";
-            vstyle  = fg_dim_(Color::slot(ThemeSlot::Text));
-            if (cfg_.idle_secs > 0) more = " idle " + compact_duration(cfg_.idle_secs);
+            // Dim, not amber: the cache did exactly what it promised.
+            vstyle = fg_dim_(Color::slot(ThemeSlot::Text));
+            word = " idle";
             break;
         case State::Miss:
-            verdict = " MISS";
-            vstyle  = Style{}.with_fg(Color::slot(ThemeSlot::Warning)).with_bold();
-            if (cfg_.tokens > 0) more = " " + compact_tokens(cfg_.tokens) + " cold";
+            vstyle = Style{}.with_fg(Color::slot(ThemeSlot::Warning)).with_bold();
+            word = " miss";
             break;
-        case State::Unreported:
-            verdict = " n/a";
-            vstyle  = fg_dim_(muted);
-            break;
-        case State::Hidden:
-            break;
+        default: break;
         }
-        parts.push_back(text(std::move(verdict), vstyle));
-        if (cfg_.detail && !more.empty())
-            parts.push_back(text(std::move(more), fg_dim_(muted)));
+        parts.push_back(text(" " + std::to_string(pct) + "%", vstyle));
+        if (word && cfg_.note) {
+            // The miss keeps its alarm colour on the word; the expected
+            // states explain themselves quietly.
+            parts.push_back(text(word, cfg_.state == State::Miss
+                                           ? vstyle
+                                           : fg_dim_(muted)));
+        }
         return h(std::move(parts)).build();
     }
 
-    // "850", "12k", "1.2k", "115k", "1.4M" — short and unpadded. Unlike the
-    // ctx gauge this field is not tabular: it changes once per request, not
-    // per frame, so there is no twitch to guard against.
-    [[nodiscard]] static std::string compact_tokens(int n) {
-        char buf[16];
-        if (n >= 1'000'000)
-            std::snprintf(buf, sizeof buf, "%.1fM", n / 1'000'000.0);
-        else if (n >= 10'000)
-            std::snprintf(buf, sizeof buf, "%dk", (n + 500) / 1000);
-        else if (n >= 1000)
-            std::snprintf(buf, sizeof buf, "%.1fk", n / 1000.0);
-        else
-            std::snprintf(buf, sizeof buf, "%d", n);
-        return buf;
-    }
-
-    [[nodiscard]] static std::string compact_duration(int secs) {
-        if (secs < 60)   return std::to_string(secs) + "s";
-        if (secs < 3600) return std::to_string(secs / 60) + "m";
-        return std::to_string(secs / 3600) + "h" +
-               (secs % 3600 >= 60 ? std::to_string((secs % 3600) / 60) + "m" : "");
-    }
-
     // Green when nearly the whole prefix is warm, plain text in between,
-    // amber when most of it was re-read cold.
+    // amber below that. (A Hit is always ≥50% reuse, so amber is for Miss.)
     [[nodiscard]] static Color hit_color(int pct) {
         if (pct >= 80) return Color::slot(ThemeSlot::Success);
         if (pct >= 50) return Color::slot(ThemeSlot::Text);

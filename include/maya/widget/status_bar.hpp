@@ -81,9 +81,9 @@ public:
         TokenStreamSparkline::Config token_stream;
         Element                      model_badge;     // default-empty = hide
         ContextGauge::Config         context;          // max=0 = hide
-        // Prompt-cache verdict, just left of the ctx gauge. state=Hidden =
-        // hide. Sheds after the sparkline (its detail first, before even the
-        // ctx token counts), and before the phase or the ctx gauge ever do.
+        // Prompt-cache percentage, just left of the ctx gauge. state=Hidden =
+        // hide. Its explaining word sheds first of anything on the row; the
+        // number goes after the sparkline, before the phase or the ctx gauge.
         CacheGauge::Config           cache;
 
         // Status row — takes over the activity_row slot when present.
@@ -188,13 +188,12 @@ private:
             // shapes and take the richest one whose measured width
             // fits. No thresholds, no estimates — a relabeled model
             // badge or a longer verb re-decides by itself. Shed order
-            // (first → last): cache detail · ctx token counts ·
-            // token-stream chip · cache gauge · phase elapsed · ctx bar ·
-            // phase verb · ctx gauge · model badge. The breadcrumb (most
-            // expendable of all) is added LAST from whatever measured
-            // leftover remains.
+            // (first → last): cache note · ctx token counts · token-stream
+            // chip · cache gauge · phase elapsed · ctx bar · phase verb ·
+            // ctx gauge · model badge. The breadcrumb (most expendable of
+            // all) is added LAST from whatever measured leftover remains.
             struct Shape {
-                bool cdetail, tokens, stream, cache, elapsed, bar, verb, gauge, badge;
+                bool cnote, tokens, stream, cache, elapsed, bar, verb, gauge, badge;
             };
             static constexpr Shape kLadder[] = {
                 {true,  true,  true,  true,  true,  true,  true,  true,  true },
@@ -251,7 +250,7 @@ private:
                 }
                 if (s.cache && cfg.cache.state != CacheGauge::State::Hidden) {
                     CacheGauge::Config cc = cfg.cache;
-                    cc.detail = s.cdetail;
+                    cc.note = s.cnote;
                     sep();
                     rparts.push_back(CacheGauge{cc}.build());
                     emitted_right = true;
