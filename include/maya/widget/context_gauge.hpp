@@ -38,6 +38,12 @@ public:
         bool show_bar    = true;     // false → drop the bar (percent only)
         bool show_tokens = true;     // false → drop the raw "used/max" counts
                                      //         (compact: bar graph + percent)
+        // Of `used`, how much the provider served from its prompt cache. When
+        // > 0 the filled bar splits: the cached stretch draws as ▓ (stored,
+        // cheap), the fresh tail as █ (paid in full this request). Same width,
+        // same zone colours — the split is a SHAPE, so it survives monochrome
+        // themes. 0 = no split (provider silent, or nothing cached yet).
+        int  cached      = 0;
     };
 
     explicit ContextGauge(Config c) : cfg_(c) {}
@@ -103,7 +109,10 @@ public:
                 } else {
                     parts.push_back(text(" ", fg_dim_(muted)));
                 }
-                parts.push_back(bar(pct, cfg_.cells));
+                const long long cached = std::clamp<long long>(cfg_.cached, 0, cfg_.used);
+                const int cached_pct = static_cast<int>(
+                    cached * 100 / static_cast<long long>(cfg_.max));
+                parts.push_back(bar(pct, cfg_.cells, cached_pct));
             } else {
                 // Placeholder numbers, same cols as live: the 6-col used
                 // field + '/' + the (trimmed) max + trailing space. Mirrors
@@ -151,7 +160,9 @@ private:
     // ── Smooth 1/8-gradation bar with per-cell color ──────────────────────
     //
     // Visual: `█████▆░░░░`  →  green green green green warn-amber dim dim dim dim
-    [[nodiscard]] static Element bar(int pct, int cells) {
+    // With a cached prefix: `▓▓▓▓█▆░░░░` — whole cells inside the cached share
+    // draw textured; the partial tip is always fresh (it is the newest part).
+    [[nodiscard]] static Element bar(int pct, int cells, int cached_pct = 0) {
         static constexpr std::string_view kPartials[8] = {
             "", "\xe2\x96\x8f", "\xe2\x96\x8e", "\xe2\x96\x8d",
             "\xe2\x96\x8c", "\xe2\x96\x8b", "\xe2\x96\x8a", "\xe2\x96\x89",
@@ -160,6 +171,8 @@ private:
 
         pct = std::clamp(pct, 0, 100);
         int total_eighths = pct * cells * 8 / 100;
+        const int cached_eighths =
+            std::clamp(cached_pct, 0, pct) * cells * 8 / 100;
 
         std::string content;
         std::vector<StyledRun> runs;
@@ -169,7 +182,9 @@ private:
         for (int i = 0; i < cells; ++i) {
             int filled = std::max(0, total_eighths - i * 8);
             std::string_view ch;
-            if      (filled >= 8) ch = "\xe2\x96\x88";  // █ full block
+            const bool cached_cell = filled >= 8 && (i + 1) * 8 <= cached_eighths;
+            if      (cached_cell) ch = "\xe2\x96\x93";  // ▓ dark shade: cached
+            else if (filled >= 8) ch = "\xe2\x96\x88";  // █ full block: fresh
             else if (filled >  0) ch = kPartials[filled];
             else                  ch = "\xe2\x96\x91";  // ░ light shade
 
