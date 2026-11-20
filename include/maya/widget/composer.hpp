@@ -37,6 +37,7 @@
 
 #include "divider.hpp"
 #include "../style/theme.hpp"
+#include "../text/unicode_width.hpp"   // truncate_to_width: the label's cut
 
 namespace maya {
 
@@ -111,6 +112,27 @@ public:
         // meaningful when `status` is empty (a non-empty status already
         // displaces them); set it to leave the left slot blank.
         bool show_key_hints = true;
+
+        // Ambient progress in the hint row's MIDDLE gap — between `status`
+        // and the right cluster, the stretch that is otherwise empty space.
+        // agentty puts the plan there: a task meter, "3/7" and the item in
+        // flight, so progress is visible without opening anything.
+        //
+        // Responsive by construction: the widget measures what is left after
+        // `status`, LOOP and the profile chip, and paints the richest rung
+        // that fits — meter + count + label, the label cut with …, count +
+        // label, meter + count, count — or nothing. It never displaces
+        // `status` or the chip, and outranks only the queued / word counters.
+        // total == 0 hides it.
+        struct Progress {
+            int         done   = 0;
+            int         total  = 0;
+            std::string label;            // one line; the caller sanitises
+            bool        active = false;   // label is IN progress (else: next up)
+            Color done_color   = Color::slot(ThemeSlot::Success);
+            Color active_color = Color::slot(ThemeSlot::Info);
+        };
+        Progress progress;
 
         // Ambient-counter overrides. The composer `text` the widget
         // sees is the CHIP-RENDERED display string — a long paste or
@@ -606,7 +628,8 @@ public:
 
         Element hint_element = component(
             [hint_left_builder, ri, kbd, lbl, dot,
-             status = cfg_.status, show_hints = cfg_.show_key_hints]
+             status = cfg_.status, show_hints = cfg_.show_key_hints,
+             prog = cfg_.progress, tc = cfg_.text_color]
             (int w, int /*h*/) -> Element {
                 using namespace dsl;
 
@@ -703,9 +726,21 @@ public:
                 const int loop_cols = show_loop ? width_of(loop_seg) : 0;
                 const bool show_queued   = ri.queued > 0
                     && loop_cols + width_of(queued_seg) + chip_cols <= budget;
+                const int queued_cols = show_queued ? width_of(queued_seg) : 0;
+
+                // Progress takes what the anchors leave, richest rung first.
+                // Placed after the left cluster with a 3-col gap, and kept
+                // 2 cols clear of the right cluster so the two never touch.
+                constexpr int kProgGap = 3, kProgClear = 2;
+                const int prog_budget = budget - loop_cols - queued_cols
+                                      - chip_cols - kProgGap - kProgClear;
+                Element prog_seg = progress_segment_(prog, prog_budget, tc,
+                                                     ri.muted_color, width_of);
+                const int prog_cols = width_of(prog_seg);
+
                 const bool show_counters = ri.has_text
-                    && loop_cols
-                        + (show_queued ? width_of(queued_seg) : 0)
+                    && loop_cols + queued_cols
+                        + (prog_cols > 0 ? prog_cols + kProgGap + kProgClear : 0)
                         + width_of(counters_seg) + chip_cols <= budget;
 
                 std::vector<Element> hint_right;
@@ -713,6 +748,11 @@ public:
                 if (show_queued)   hint_right.push_back(std::move(queued_seg));
                 if (show_counters) hint_right.push_back(std::move(counters_seg));
                 hint_right.push_back(std::move(chip));
+
+                if (prog_cols > 0) {
+                    if (!left.empty()) left.push_back(text("   "));
+                    left.push_back(std::move(prog_seg));
+                }
 
                 // 2-col indent so the hint row lines up with body text:
                 // `inner` has padding(0,1) (→1 col left), and body row 0
@@ -858,6 +898,82 @@ private:
 
     // Right-aligned fixed-width int — keeps surrounding chips pinned as
     // counters tick.
+    // ── The progress segment's ladder ──
+    //
+    //   ━━━━━━━━━━ 3/7  ● Wiring the cache chip into the status bar
+    //   ━━━━━━━━━━ 3/7  ● Wiring the cache ch…
+    //   3/7  ● Wiring the cache ch…
+    //   ━━━━━━━━━━ 3/7
+    //   3/7
+    //
+    // Every rung is MEASURED, never estimated, so a wide glyph in a label
+    // re-decides on its own. A label is only worth showing with at least
+    // kMinLabel columns of it left; below that the rungs without one win,
+    // because "Wi…" says nothing a count does not. The meter is one cell per
+    // task up to ten, then scales — so a short plan reads as discrete steps
+    // and a long one as a bar.
+    template <class WidthOf>
+    static Element progress_segment_(const Config::Progress& p, int budget,
+                                     Color text_c, Color muted_c,
+                                     WidthOf&& width_of) {
+        using namespace dsl;
+        if (p.total <= 0 || budget <= 0) return Element{};
+        constexpr int kMinLabel = 10, kMaxLabel = 56, kMaxCells = 10;
+        const int done  = std::clamp(p.done, 0, p.total);
+        const bool all  = done == p.total;
+        const int cells = std::min(p.total, kMaxCells);
+        const int lit   = all ? cells : (done * cells) / p.total;
+        const char* bar = "\xe2\x94\x81";   // ━
+        std::string lit_s, dim_s;
+        for (int i = 0; i < cells; ++i) (i < lit ? lit_s : dim_s) += bar;
+        const Color count_c = all ? p.done_color : p.active_color;
+
+        auto meter = [&] {
+            return h(text(lit_s, Style{}.with_fg(p.done_color)),
+                     text(dim_s, fg_dim_(muted_c))).build();
+        };
+        auto count = [&] {
+            return text(std::to_string(done) + "/" + std::to_string(p.total),
+                        Style{}.with_fg(count_c).with_bold());
+        };
+        // The label rung, or empty when fewer than kMinLabel columns remain.
+        auto labelled = [&](bool with_meter) -> Element {
+            if (p.label.empty()) return Element{};
+            std::vector<Element> parts;
+            if (with_meter) { parts.push_back(meter()); parts.push_back(text(" ")); }
+            parts.push_back(count());
+            const char* glyph = all ? "  \xe2\x9c\x93 "          // ✓
+                              : p.active ? "  \xe2\x97\x8f "     // ●
+                                         : "  \xe2\x97\x8b ";    // ○
+            const Color glyph_c = all ? p.done_color
+                                : p.active ? p.active_color : muted_c;
+            parts.push_back(text(glyph, Style{}.with_fg(glyph_c).with_bold()));
+            const int fixed = width_of(h(parts).build());
+            const int room  = std::min(budget - fixed, kMaxLabel);
+            if (room < kMinLabel) return Element{};
+            std::string lab{p.label};
+            if (unicode::str_width(lab) > room) {
+                lab = std::string{unicode::truncate_to_width(lab, room - 1)};
+                while (!lab.empty() && lab.back() == ' ') lab.pop_back();
+                lab += "\xe2\x80\xa6";   // …
+            }
+            parts.push_back(text(std::move(lab),
+                p.active || all ? Style{}.with_fg(text_c) : fg_dim_(muted_c)));
+            return h(std::move(parts)).build();
+        };
+
+        // Richest first; each rung is built only if the one above it lost.
+        for (int rung = 0; rung < 4; ++rung) {
+            Element cand = rung == 0 ? labelled(true)
+                         : rung == 1 ? labelled(false)
+                         : rung == 2 ? Element{h(meter(), text(" "), count()).build()}
+                                     : Element{h(count()).build()};
+            const int cw = width_of(cand);
+            if (cw > 0 && cw <= budget) return cand;
+        }
+        return Element{};
+    }
+
     // Letter-spaced uppercase ("D O N E") for short labels.
     static std::string small_caps_(std::string_view s) {
         std::string out;
