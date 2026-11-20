@@ -40,6 +40,7 @@
 #include "../style/color.hpp"
 
 #include "context_gauge.hpp"
+#include "cache_chip.hpp"
 #include "phase_accent.hpp"
 #include "phase_chip.hpp"
 #include "status_banner.hpp"
@@ -80,6 +81,10 @@ public:
         TokenStreamSparkline::Config token_stream;
         Element                      model_badge;     // default-empty = hide
         ContextGauge::Config         context;          // max=0 = hide
+        // Prompt-cache verdict, just left of the ctx gauge. state=Hidden =
+        // hide. Sheds after the sparkline (its detail first, before even the
+        // ctx token counts), and before the phase or gauge ever do.
+        CacheChip::Config            cache;
 
         // Status row — takes over the activity_row slot when present.
         StatusBanner::Config         status_banner;
@@ -183,22 +188,25 @@ private:
             // shapes and take the richest one whose measured width
             // fits. No thresholds, no estimates — a relabeled model
             // badge or a longer verb re-decides by itself. Shed order
-            // (first → last): ctx token counts · token-stream chip ·
-            // phase elapsed · ctx bar · phase verb · ctx gauge · model
-            // badge. The breadcrumb (most expendable of all) is added
-            // LAST from whatever measured leftover remains.
+            // (first → last): cache detail · ctx token counts ·
+            // token-stream chip · cache chip · phase elapsed · ctx bar ·
+            // phase verb · ctx gauge · model badge. The breadcrumb (most
+            // expendable of all) is added LAST from whatever measured
+            // leftover remains.
             struct Shape {
-                bool tokens, stream, elapsed, bar, verb, gauge, badge;
+                bool cdetail, tokens, stream, cache, elapsed, bar, verb, gauge, badge;
             };
             static constexpr Shape kLadder[] = {
-                {true,  true,  true,  true,  true,  true,  true },
-                {false, true,  true,  true,  true,  true,  true },
-                {false, false, true,  true,  true,  true,  true },
-                {false, false, false, true,  true,  true,  true },
-                {false, false, false, false, true,  true,  true },
-                {false, false, false, false, false, true,  true },
-                {false, false, false, false, false, false, true },
-                {false, false, false, false, false, false, false},
+                {true,  true,  true,  true,  true,  true,  true,  true,  true },
+                {false, true,  true,  true,  true,  true,  true,  true,  true },
+                {false, false, true,  true,  true,  true,  true,  true,  true },
+                {false, false, false, true,  true,  true,  true,  true,  true },
+                {false, false, false, false, true,  true,  true,  true,  true },
+                {false, false, false, false, false, true,  true,  true,  true },
+                {false, false, false, false, false, false, true,  true,  true },
+                {false, false, false, false, false, false, false, true,  true },
+                {false, false, false, false, false, false, false, false, true },
+                {false, false, false, false, false, false, false, false, false},
             };
 
             Element right, phase_el, middle;
@@ -239,6 +247,13 @@ private:
                 if (s.badge && width_of(cfg.model_badge) > 0) {
                     sep();
                     rparts.push_back(cfg.model_badge);
+                    emitted_right = true;
+                }
+                if (s.cache && cfg.cache.state != CacheChip::State::Hidden) {
+                    CacheChip::Config cc = cfg.cache;
+                    cc.detail = s.cdetail;
+                    sep();
+                    rparts.push_back(CacheChip{cc}.build());
                     emitted_right = true;
                 }
                 if (cfg.context.max > 0 && s.gauge) {
