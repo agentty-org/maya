@@ -63,6 +63,9 @@ public:
         int         cursor = 0;
 
         State state         = State::Idle;
+        // AwaitingPermission's placeholder, when the wait is not a permission
+        // prompt ("answer the question above"). Empty: the default wording.
+        std::string awaiting_text;
         // The color used for the border / prompt while the agent is
         // active (Streaming / ExecutingTool). Caller picks based on the
         // current phase so the composer matches the status bar.
@@ -393,17 +396,21 @@ public:
             // the user keeps the "type to add another" affordance
             // visible too.
             std::string placeholder;
+            // What the awaiting state is about, when the host knows better than
+            // "permission" (a question to answer, say).
+            const std::string awaiting = cfg_.awaiting_text.empty()
+                ? std::string{"awaiting permission \xe2\x80\x94 respond above"} : cfg_.awaiting_text;
             if (cfg_.queued > 0) {
                 placeholder = cfg_.queued == 1
                     ? std::string{"press \xe2\x86\x91 to edit queued"}            // ↑
                     : std::string{"\xe2\x86\x91 drain queue • \xe2\x8c\xa5\xe2\x86\x91/\xe2\x8c\xa5\xe2\x86\x93 cycle items"};  // ↑ / ⌥↑ ⌥↓
-                if (is_awaiting)       placeholder += " \xe2\x80\x94 awaiting permission above\xe2\x80\xa6";
+                if (is_awaiting)       placeholder += " \xe2\x80\x94 " + awaiting + "\xe2\x80\xa6";
                 else if (is_executing) placeholder += " \xe2\x80\x94 type to queue another\xe2\x80\xa6";
                 else if (is_streaming) placeholder += " \xe2\x80\x94 type to queue another\xe2\x80\xa6";
                 else                   placeholder += " \xe2\x80\x94 or type a new message\xe2\x80\xa6";
             } else {
                 placeholder =
-                    is_awaiting  ? "awaiting permission \xe2\x80\x94 respond above\xe2\x80\xa6" :
+                    is_awaiting  ? awaiting + "\xe2\x80\xa6" :
                     is_executing ? "running tool \xe2\x80\x94 type to queue\xe2\x80\xa6"        :
                     is_streaming ? "streaming \xe2\x80\x94 type to queue\xe2\x80\xa6"           :
                                    "type a message\xe2\x80\xa6";
