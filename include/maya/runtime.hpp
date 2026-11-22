@@ -70,6 +70,7 @@ using ::jaal::Subscribing;
 using ::jaal::HasVisualHash;
 using ::jaal::HasNeedsWarmup;
 using ::jaal::handled_as_group;
+using ::jaal::prog::flags_t;    // a program's declared Flags (the data init starts from), or monostate
 // Input: a program writes on(const Model&, const E&). These name what it takes.
 using ::jaal::kernel::no_events; // `using Event = no_events;`: takes no input
 using ::jaal::event_of_t;       // a program's declared Event, or no_events
@@ -93,6 +94,7 @@ using ::jaal::sig;
 
 // ── Values that cross threads ───────────────────────────────────────────
 using ::jaal::Sendable;
+using ::jaal::Postable;         // what a Msg must be: Sendable, or loop-only parts no Sink carries
 using ::jaal::Frozen;
 using ::jaal::Sync;             // many threads may use one T& at once
 using ::jaal::shared;           // Sendable && Frozen, shared without a lock
@@ -100,6 +102,8 @@ using ::jaal::co_owned;         // Sync state that jobs and their owner share
 
 // ── Concurrency ─────────────────────────────────────────────────────────────────────────
 using ::jaal::guarded;          // a value only reachable under its lock: guarded<T, Rank>
+using ::jaal::cell;             // a LEAF lock usable with no capability: captureless body, Sendable in/out
+using ::jaal::lazy;             // built once on first use, then read-only (Sync)
 // Lock order is a type (jaal core/capability.hpp). A lock's rank:
 using ::jaal::rank;             // rank<N, "name">: lower ranks are taken first
 using ::jaal::leaf;             // the default rank: taken last, alone
@@ -221,3 +225,11 @@ using ::jaal::run_tasks_inline;   // run a Cmd's tasks inline, get their message
 // can never be destroyed (and wait) inside a lock body.
 #define MAYA_JOINS_ON_DESTROY(...) \
     template <> inline constexpr bool ::jaal::joins_on_destroy<__VA_ARGS__> = true
+// A message the loop may make but no Sink may carry (it holds a callable
+// whose captures jaal can't see). It may sit in a Msg; posting one from a
+// worker does not compile.
+#define MAYA_LOOP_ONLY(...) \
+    template <> inline constexpr bool ::jaal::loop_only<__VA_ARGS__> = true
+// Owned fields, thread-bound meaning (a handle valid on its own thread only).
+#define MAYA_NOT_SENDABLE(...) \
+    template <> inline constexpr bool ::jaal::sendable_opt_out<__VA_ARGS__> = true

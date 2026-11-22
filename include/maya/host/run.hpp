@@ -63,6 +63,11 @@ namespace maya {
 
 /// Run a Program on jaal, in this terminal. The one entry point.
 ///
+/// `flags` is the data a run starts with, for a program that declares
+/// `using Flags = ...; static Cmd init(Model&, const Flags&)`: the caller
+/// reads it (argv, the environment, a config) and passes it in, so init
+/// never reads a global.
+///
 /// Exit codes: the program's own via Cmd::quit(n), or 70 (EX_SOFTWARE) if
 /// the terminal can't be opened — there is no screen to report on, so it is
 /// the one failure run() answers for itself.
@@ -76,7 +81,7 @@ namespace maya {
 /// `template <class> class` relies on P0522, which MSVC doesn't implement --
 /// every maya::run<App>() call failed there with C2672.
 template <Program P, template <class...> class Host = terminal_host>
-int run(Options cfg = {}, jaal::run_options opt = {}) {
+int run(Options cfg = {}, jaal::run_options opt = {}, jaal::prog::flags_t<P> flags = {}) {
     // Report a missing handle()/start_source() in jaal's words — it names
     // the effect and the program. Without this the error still happens, as
     // an unsatisfied constraint on jaal::run several levels down.
@@ -99,7 +104,9 @@ int run(Options cfg = {}, jaal::run_options opt = {}) {
     host_detail::executor_scope exec;
     Host<P> host{*term, cfg.fps};
     host.set_interrupt_exit(opt.default_signal_exit);   // ^C typed in raw mode
-    return jaal::run<P>(host, std::move(opt));
+    // Flags: the data the run starts with (a program's `using Flags`), handed
+    // to its init(Model&, const Flags&). A program without Flags passes none.
+    return jaal::run<P>(host, std::move(opt), jaal::durable<P>{}, std::move(flags));
 }
 
 }  // namespace maya
