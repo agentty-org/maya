@@ -9,12 +9,13 @@
 //    TitleChip ·  PhaseChip   …    TokenStreamSparkline   ●Model · ContextGauge
 //   ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁   ← PhaseAccent (bottom)
 //
-// When `status_banner.text` is non-empty the activity row is replaced
-// by a full-width toast in the same vertical slot — bright foreground
-// + accent background span the whole row so transient status ("context
-// compacted", "retrying in 3s…", "error: rate limited") is impossible
-// to miss. The toast collapses back to the regular activity row the
-// moment its TTL expires; height stays constant either way.
+// When `status_banner.text` is non-empty the activity row's left side
+// becomes a toast band — bright foreground on the severity colour — so
+// transient status ("context compacted", "retrying in 3s…", "error:
+// rate limited") is impossible to miss, while the context and cache
+// gauges stay on the right (they shed only when the band would drop
+// below kToastMin columns). The row returns to the activity strip the
+// moment the toast's TTL expires; height stays constant either way.
 //
 // Width-adaptive by MEASUREMENT: the activity row builds its real
 // fragments at progressively leaner shapes and takes the richest one
@@ -27,7 +28,7 @@
 //       .token_stream  = token_stream_sparkline_config(m),
 //       .model_badge   = model_badge_config(m).build(),
 //       .context       = context_gauge_config(m),
-//       .status_banner = status_banner_config(m),  // toast — hides activity row when present
+//       .status_banner = status_banner_config(m),  // toast — takes the row's left while present
 //   }}.build();
 
 #include <algorithm>
@@ -69,6 +70,11 @@ public:
     // not a table.
     static constexpr std::string_view kSep  = " \xc2\xb7 ";
     static constexpr int              kSepW = unicode::str_width(kSep);
+
+    // The fewest columns a toast's band may be squeezed to before the
+    // gauges beside it give way (see toast_row). Enough for the glyph and
+    // a short sentence: "copied to clipboard" is 19.
+    static constexpr int              kToastMin = 28;
 
     struct Config {
         // Frame coloring — drives the top/bottom PhaseAccent strips
@@ -464,13 +470,60 @@ private:
           : (kind == Kind::Warn)  ? "\xe2\x9a\xa0"   // ⚠
                                   : "\xe2\x96\xb6"; // ▶
 
-        // Render as a two-segment row: a 1-cell rail in `rail` color,
-        // then the body in `fg`-on-`bg`. The rail is painted on the
-        // same bg so it reads as a brighter accent stripe inside the
-        // band rather than an external chip floating on the panel.
-        return component([band, msg, glyph](int w, int /*h*/) -> Element {
+        // The band takes the row's left; the gauges keep its right.
+        //
+        // A toast used to take the WHOLE row. Impossible to miss, and for
+        // as long as it stood the row stopped doing its job: the context
+        // and cache gauges, the two numbers people actually glance at,
+        // vanished for every "copied to clipboard" — and for the whole of a
+        // toast that never cleared. Now the gauges stay, at the richest
+        // shape that still leaves the message kToastMin columns, leaner
+        // after that, and only shed outright on a terminal too narrow to
+        // hold both. Same measuring rule as the activity ladder: build the
+        // real fragment, take its real width.
+        //
+        // The band itself: a 1-cell rail then the body, both on the band
+        // colour, so the rail reads as a brighter stripe inside the band
+        // rather than a chip floating beside it.
+        return component([band, msg, glyph, cache = cfg_.cache,
+                          ctx = cfg_.context](int full_w, int /*h*/) -> Element {
             using namespace dsl;
-            if (w <= 0) return blank().build();
+            if (full_w <= 0) return blank().build();
+
+            const Color muted = Color::slot(ThemeSlot::Muted);
+            auto gauges = [&](bool bar, bool with_cache) {
+                std::vector<Element> parts;
+                if (with_cache && cache.state != CacheGauge::State::Hidden) {
+                    CacheGauge::Config cc = cache;
+                    cc.note = false;
+                    parts.push_back(CacheGauge{cc}.build());
+                }
+                if (ctx.max > 0) {
+                    if (!parts.empty()) parts.push_back(text(kSep, fg_dim_(muted)));
+                    ContextGauge::Config g = ctx;
+                    g.show_bar    = bar;
+                    g.show_tokens = false;
+                    parts.push_back(ContextGauge{g}.build());
+                }
+                return parts;
+            };
+            std::vector<Element> right;
+            int right_w = 0;
+            constexpr struct { bool bar, cache; } kShapes[] = {
+                {true, true}, {false, true}, {false, false}};
+            for (const auto& s : kShapes) {
+                auto parts = gauges(s.bar, s.cache);
+                if (parts.empty()) break;
+                Element probe = h(parts).build();
+                // " " gap after the band + the gauges + " " at the edge.
+                const int need = measure_element(probe, 1 << 14).width.value + 2;
+                if (full_w - need >= kToastMin) {
+                    right   = std::move(parts);
+                    right_w = need;
+                    break;
+                }
+            }
+            const int w = full_w - right_w;
 
             // Layout: "▎ ▶  message..........."
             //          ^   ^^^                  trailing bg-painted pad
@@ -526,7 +579,15 @@ private:
                 : blank().build();
             auto body_el = text(std::move(body), band.with_bold()).build();
             (void)pre_w;   // reserved for future right-aligned timestamp slot
-            return h(std::move(rail_el), std::move(body_el)).build();
+            if (right.empty())
+                return h(std::move(rail_el), std::move(body_el)).build();
+            std::vector<Element> row;
+            row.push_back(std::move(rail_el));
+            row.push_back(std::move(body_el));
+            row.push_back(text(" "));
+            for (auto& e : right) row.push_back(std::move(e));
+            row.push_back(text(" "));
+            return h(std::move(row)).build();
         });
     }
 
