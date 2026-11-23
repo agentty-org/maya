@@ -45,6 +45,7 @@
 #include "phase_accent.hpp"
 #include "phase_chip.hpp"
 #include "status_banner.hpp"
+#include "stream_note.hpp"
 #include "title_chip.hpp"
 #include "token_stream_sparkline.hpp"
 #include "../style/theme.hpp"
@@ -91,6 +92,12 @@ public:
         // hide. Its explaining word sheds first of anything on the row; the
         // number goes after the sparkline, before the phase or the ctx gauge.
         CacheGauge::Config           cache;
+
+        // Live narration of the stream, right after the phase chip (see
+        // stream_note.hpp). text empty = hide. While present it owns the
+        // row's middle: the adaptive sparkline and the title give way, the
+        // gauges stay.
+        StreamNote::Config           note;
 
         // Status row — takes over the activity_row slot when present.
         StatusBanner::Config         status_banner;
@@ -220,7 +227,7 @@ private:
             // Which fragments the CHOSEN rung actually kept. The title is
             // admitted below only when the richest fragments survived — see
             // the note there.
-            bool kept_verb = false, kept_gauge = false;
+            bool kept_verb = false, kept_gauge = false, kept_note = false;
             for (const Shape& s : kLadder) {
                 PhaseChip::Config pc = cfg.phase;
                 pc.verb_width = s.verb ? 10 : 0;
@@ -245,7 +252,10 @@ private:
                     if (emitted_right)
                         rparts.push_back(text(kSep, fg_dim_(muted)));
                 };
-                if (s.stream && !cfg.token_stream.adaptive) {
+                // A stream note means no tokens are flowing: a flat "0.0 t/s"
+                // chart beside it only steals the note's columns.
+                if (s.stream && !cfg.token_stream.adaptive
+                    && !StreamNote{cfg.note}.visible()) {
                     rparts.push_back(TokenStreamSparkline{cfg.token_stream}.build());
                     emitted_right = true;
                 }
@@ -293,9 +303,22 @@ private:
                 // gap) or draw one it never reserved (the collision again).
                 const bool has_right = width_of(cand_right) > 0;
 
-                const int middle_min = (s.stream && cfg.token_stream.adaptive)
-                    ? 8 + kSepW   // spark floor + separator
-                    : (has_right ? 1 : 0);  // seam gap
+                // The note outranks the sparkline (a retry has no tokens
+                // to chart) and sheds with the verb: on a rung that can't
+                // afford the verb, the explanation of the verb is noise.
+                const bool note_on = StreamNote{cfg.note}.visible() && s.verb;
+                // Reserve the note's natural width (capped) so the ladder
+                // sheds the gauges' raw counts and bar BEFORE it truncates
+                // the sentence explaining why the turn isn't moving — the
+                // last rung still accepts the note at its floor.
+                const int note_floor = note_on
+                    ? std::min(StreamNote{cfg.note}.natural_width(), 40)
+                    : 0;
+                const int middle_min = note_on
+                    ? 2 + std::max(note_floor, StreamNote::kMinWidth) + 1   // gap + note + seam
+                    : (s.stream && cfg.token_stream.adaptive)
+                        ? 8 + kSepW   // spark floor + separator
+                        : (has_right ? 1 : 0);  // seam gap
 
                 const int need = 1 /*lead sp*/ + 1 /*rail*/ + 1 /*sp*/
                     + width_of(cand_phase) + middle_min
@@ -315,12 +338,22 @@ private:
                     // the right, so a bare strip grows no phantom trailing
                     // space (that would be the dangling-separator bug in
                     // whitespace form).
-                    middle = (s.stream && cfg.token_stream.adaptive)
-                        ? (h(TokenStreamSparkline{cfg.token_stream}.build(),
-                             text(kSep, fg_dim_(muted))) | grow(1.0f)).build()
-                        : (has_right
-                            ? (h(spacer(), text(" ")) | grow(1.0f)).build()
-                            : Element{spacer().build()});
+                    // The note is built at the EXACT columns left over, not as
+                    // a self-sizing component: a component offers its whole
+                    // parent width as its natural size, and the row then
+                    // squeezed the phase chip to make room for it.
+                    const int note_w = w - (need - middle_min) - 3;
+                    middle = note_on
+                        ? (h(text("  "),
+                             StreamNote{cfg.note}.build_at(note_w),
+                             spacer(), text(" ")) | grow(1.0f)).build()
+                        : (s.stream && cfg.token_stream.adaptive)
+                            ? (h(TokenStreamSparkline{cfg.token_stream}.build(),
+                                 text(kSep, fg_dim_(muted))) | grow(1.0f)).build()
+                            : (has_right
+                                ? (h(spacer(), text(" ")) | grow(1.0f)).build()
+                                : Element{spacer().build()});
+                    kept_note = note_on;
                     break;
                 }
             }
@@ -348,7 +381,9 @@ private:
             //    could satisfy the width test on a rung that had already
             //    dropped both, which is exactly what a narrower separator
             //    made reachable.
-            const bool title_allowed = kept_verb && kept_gauge;
+            //    And never beside a stream note: the note IS what the
+            //    leftover columns are for while it stands.
+            const bool title_allowed = kept_verb && kept_gauge && !kept_note;
             if (!cfg.breadcrumb.title.empty() && title_allowed) {
                 constexpr int kChipDecor = 2;   // ▎ + space
                 constexpr int kMinTitle  = 12;  // below this a title is noise
