@@ -271,7 +271,14 @@ private:
                     rparts.push_back(CacheGauge{cc}.build());
                     emitted_right = true;
                 }
-                if (cfg.context.max > 0 && s.gauge) {
+                // An EMPTY gauge (no usage reported yet: "——/200k ———%") is a
+                // placeholder that keeps the row from shifting when the first
+                // count lands. Beside a stream note it has nothing to say and
+                // only steals the columns the note needs — a turn that never
+                // got a reply never will report usage while it retries.
+                const bool ctx_empty_vs_note =
+                    cfg.context.used <= 0 && StreamNote{cfg.note}.visible();
+                if (cfg.context.max > 0 && s.gauge && !ctx_empty_vs_note) {
                     sep();
                     rparts.push_back(ContextGauge{ctx}.build());
                     emitted_right = true;
@@ -309,11 +316,16 @@ private:
                 const bool note_on = StreamNote{cfg.note}.visible() && s.verb;
                 // Reserve the note's natural width (capped) so the ladder
                 // sheds the gauges' raw counts and bar BEFORE it truncates
-                // the sentence explaining why the turn isn't moving — the
-                // last rung still accepts the note at its floor.
-                const int note_floor = note_on
-                    ? std::min(StreamNote{cfg.note}.natural_width(), 40)
-                    : 0;
+                // the sentence explaining why the turn isn't moving. Once
+                // those are gone (no tokens, no bar) the reservation drops
+                // to the note's floor — a narrow terminal gets a shortened
+                // reason rather than losing the verb, and the note with it.
+                const StreamNote note_w_probe{cfg.note};
+                const int note_floor = !note_on ? 0
+                    : (s.tokens || s.bar)
+                        ? std::min(note_w_probe.natural_width(), 40)
+                        : StreamNote::kMinWidth
+                          + (cfg.note.tail.empty() ? 0 : string_width(cfg.note.tail) + 2);
                 const int middle_min = note_on
                     ? 2 + std::max(note_floor, StreamNote::kMinWidth) + 1   // gap + note + seam
                     : (s.stream && cfg.token_stream.adaptive)
@@ -533,7 +545,8 @@ private:
                     cc.note = false;
                     parts.push_back(CacheGauge{cc}.build());
                 }
-                if (ctx.max > 0) {
+                // Same rule as the activity row: an empty gauge yields.
+                if (ctx.max > 0 && ctx.used > 0) {
                     if (!parts.empty()) parts.push_back(text(kSep, fg_dim_(muted)));
                     ContextGauge::Config g = ctx;
                     g.show_bar    = bar;
