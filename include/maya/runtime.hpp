@@ -67,6 +67,9 @@ using ::jaal::payload_t;
 using ::jaal::host_context;
 using ::jaal::require_host_for;
 using ::jaal::run_options;
+using ::jaal::fault;            // what run_options().kernel.faults is told
+using ::jaal::fault_site;       // update / subscribe / effect / task
+using ::jaal::to_string;        // fault_site -> "update", ...
 using ::jaal::Subscribing;
 using ::jaal::HasVisualHash;
 using ::jaal::HasNeedsWarmup;
