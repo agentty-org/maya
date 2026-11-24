@@ -588,7 +588,7 @@ public:
     // Inline only. Fullscreen already owns the whole screen via the
     // alt buffer; route it through Divergent for parity (full
     // serialize from home next frame).
-    void reset_inline() noexcept {
+    void reset_inline(bool replay_history = true) noexcept {
         fs_coherence_ = coherent::Divergent{};
         if (auto* s = std::get_if<inline_frame::InlineFrame<inline_frame::Synced>>(
                 &in_coherence_)) {
@@ -601,9 +601,10 @@ public:
         // already repaint cleanly, HardReset is already armed.
         //
         // The wipe takes the host's scrollback with it; a host with a replay
-        // source gets its history back in the same frame (a thread switch
-        // lands with the whole thread scrollable, not just the live window).
-        replay_owed_ = true;
+        // source can have its history printed back in the same frame. Only
+        // when asked: a rewrap needs it, a content swap doesn't (see
+        // ResetInline in host/effects.hpp for what it costs).
+        replay_owed_ = replay_history;
     }
 
     // ── Scrollback replay (render/scrollback_replay.hpp) ────────────────

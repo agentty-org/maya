@@ -402,7 +402,7 @@ public:
     void handle(EmitHostSequence e) { term_.emit_host_sequence(e.sequence); }
     void handle(CommitOverflow)     { term_.commit_overflow(); dirty_ = true; }
     void handle(ForceRedraw)        { term_.force_redraw();    dirty_ = true; }
-    void handle(ResetInline)        { term_.reset_inline();    dirty_ = true; }
+    void handle(ResetInline r)      { term_.reset_inline(r.replay_history); dirty_ = true; }
     void handle(SetMouse s)         { term_.set_mouse(s.on); }
 
     // Hand the real tty to an interactive child and answer with how it went

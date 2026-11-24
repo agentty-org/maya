@@ -83,7 +83,15 @@ struct ForceRedraw {};
 using force_redraw = jaal::pure_fx<ForceRedraw, "force_redraw">;
 
 /// Drop the inline frame's history and start a fresh one below it.
-struct ResetInline {};
+///
+/// `replay_history`: also print the program's scrollback history back above
+/// the new frame (render/scrollback_replay.hpp), at the current width. Right
+/// for a REWRAP (the rows on screen were laid out at an old width and must
+/// all be printed again). Wrong for a CONTENT SWAP -- a thread switch, a new
+/// thread: the replay of a long thread is megabytes, seconds of layout and a
+/// visible scroll of every row through the terminal, to land the user where
+/// the live canvas alone already lands them.
+struct ResetInline { bool replay_history = true; };
 using reset_inline = jaal::pure_fx<ResetInline, "reset_inline">;
 
 /// Turn mouse capture on or off (off lets the terminal's own text

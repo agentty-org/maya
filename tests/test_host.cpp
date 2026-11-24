@@ -126,7 +126,8 @@ struct FakeDevice {
     void commit_scrollback(ScrollbackDebt)      { ++commits;      log.push_back("commit_scrollback"); }
     void commit_overflow()                      { ++overflows;    log.push_back("commit_overflow"); }
     void force_redraw()                         { ++redraws;      log.push_back("force_redraw"); }
-    void reset_inline()                         { ++resets;       log.push_back("reset_inline"); }
+    void reset_inline(bool replay)              { ++resets; last_reset_replay = replay; log.push_back("reset_inline"); }
+    bool last_reset_replay = true;
     void set_scrollback_replay(ScrollbackReplay s) { replay = std::move(s); log.push_back("set_scrollback_replay"); }
     ScrollbackReplay replay;
     void set_mouse(bool on)                     { mouse_on = on;  log.push_back("set_mouse"); }
@@ -300,6 +301,10 @@ TEST_CASE("host: every terminal effect is one device call") {
     CHECK(dev.overflows == 1, "  commit_overflow must be one call (got %d)\n", dev.overflows);
     CHECK(dev.redraws == 1,   "  force_redraw must be one call (got %d)\n", dev.redraws);
     CHECK(dev.resets == 1,    "  reset_inline must be one call (got %d)\n", dev.resets);
+    CHECK(dev.last_reset_replay, "  ResetInline{} keeps replaying history (the rewrap default)\n");
+    h.handle(ResetInline{.replay_history = false});
+    CHECK(!dev.last_reset_replay,
+          "  a content swap's ResetInline{false} must reach the device as no replay\n");
     CHECK(dev.mouse_on,       "  set_mouse(true) must reach the device\n");
 }
 

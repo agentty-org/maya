@@ -224,7 +224,7 @@ public:
     void emit_host_sequence(std::string_view seq)  { rt_->emit_host_sequence(seq); }
     void commit_scrollback(ScrollbackDebt debt)    { rt_->commit_inline_prefix(debt.rows()); }
     void commit_overflow()                         { rt_->commit_inline_overflow(); invalidate(); }
-    void reset_inline()                            { rt_->reset_inline(); invalidate(); }
+    void reset_inline(bool replay_history = true)  { rt_->reset_inline(replay_history); invalidate(); }
     void set_scrollback_replay(ScrollbackReplay s) { rt_->set_scrollback_replay(std::move(s)); }
     [[nodiscard]] const ReplayStats& last_scrollback_replay() const noexcept {
         return rt_->last_scrollback_replay();
