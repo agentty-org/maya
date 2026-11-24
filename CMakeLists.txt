@@ -11,6 +11,13 @@ else()
 endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# maya uses no C++ modules, in any target (see the `maya` target below for
+# why scanning is worse than useless here). Off for EVERY target, examples
+# and tests included: MSVC's ninja scan runs through a synthesised
+# @cmake_cxx_std@ target that doesn't carry an INTERFACE library's include
+# path, so an example scanned there could not find jaal/meta/target.hpp.
+# agentty sets the same, for the same reason.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 # What platform this build is for, asked of the C++ headers (jaal decides it
 # once; maya/core/target.hpp re-exports it). Every platform branch below reads
