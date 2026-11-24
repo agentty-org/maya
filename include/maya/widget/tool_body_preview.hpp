@@ -2491,7 +2491,15 @@ private:
         std::vector<Match> matches;
         matches.reserve(all.size());
         for (auto ln : all) {
-            const auto p1 = ln.find(':');
+            // A Windows absolute path (`C:\x` / `C:/x`) carries a drive-letter
+            // colon; the path/line separator is the NEXT one. Splitting on the
+            // drive colon made every row unparsable, so each fell back to a
+            // raw `C:\long\path:31:text` line that wrapped across the card.
+            const std::size_t from =
+                (ln.size() > 2 && ln[1] == ':' && (ln[2] == '\\' || ln[2] == '/')
+                 && ((ln[0] >= 'A' && ln[0] <= 'Z') || (ln[0] >= 'a' && ln[0] <= 'z')))
+                ? 2 : 0;
+            const auto p1 = ln.find(':', from);
             const auto p2 = (p1 == std::string_view::npos)
                           ? std::string_view::npos
                           : ln.find(':', p1 + 1);
