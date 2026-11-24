@@ -1,9 +1,12 @@
 #pragma once
 // maya::platform::detect - Compile-time platform identity
 //
-// Every platform fact is a constexpr value. Preprocessor guards are
-// contained HERE and in the two macros at the bottom. All other maya
-// code branches on the constexpr values or uses concept dispatch.
+// Every platform fact is a constexpr value, DERIVED from maya/core/target.hpp
+// (which re-exports jaal's one decision of what the platform is). Nothing in
+// this file reads a compiler's raw target macro; the compiler-portability
+// spellings at the bottom (restrict, force-inline) ask MAYA_CC_* too.
+// All other maya code branches on the constexpr values or uses concept
+// dispatch.
 //
 // Usage:
 //   if constexpr (platform::is_posix) { ... }        // compile-time branch
@@ -12,6 +15,8 @@
 
 #include <cstdint>
 #include <type_traits>
+
+#include "../core/target.hpp"
 
 namespace maya::platform {
 
@@ -29,15 +34,15 @@ enum class Os : uint8_t {
 };
 
 inline constexpr Os os =
-#if defined(__linux__) || defined(__CYGWIN__)
+#if MAYA_OS_LINUX
     Os::Linux;
-#elif defined(__APPLE__) && defined(__MACH__)
+#elif MAYA_OS_APPLE
     Os::MacOS;
-#elif defined(_WIN32) && !defined(__unix__) && !defined(__CYGWIN__)
+#elif MAYA_OS_WINDOWS
     Os::Windows;
-#elif defined(__FreeBSD__)
+#elif MAYA_OS_FREEBSD
     Os::FreeBSD;
-#elif defined(__OpenBSD__)
+#elif MAYA_OS_OPENBSD
     Os::OpenBSD;
 #else
     Os::Unknown;
@@ -56,13 +61,13 @@ enum class Arch : uint8_t {
 };
 
 inline constexpr Arch arch =
-#if defined(__x86_64__) || defined(_M_X64)
+#if MAYA_CPU_X86_64
     Arch::X86_64;
-#elif defined(__aarch64__) || defined(_M_ARM64)
+#elif MAYA_CPU_ARM64
     Arch::Aarch64;
 #elif defined(__riscv) && (__riscv_xlen == 64)
     Arch::Riscv64;
-#elif defined(__wasm32__) || defined(__EMSCRIPTEN__)
+#elif defined(__wasm32__) || MAYA_OS_EMSCRIPTEN
     Arch::Wasm32;
 #else
     Arch::Unknown;
@@ -98,16 +103,16 @@ struct SimdCaps {
 };
 
 inline constexpr SimdCaps simd_caps = {
-#if defined(__AVX512F__)
+#if MAYA_ISA_AVX512F
     .avx512f = true,
 #endif
-#if defined(__AVX2__)
+#if MAYA_ISA_AVX2
     .avx2 = true,
 #endif
-#if defined(__x86_64__) || defined(_M_X64)
+#if MAYA_CPU_X86_64
     .sse2 = true,                  // x86-64 baseline
 #endif
-#if defined(__aarch64__) || defined(_M_ARM64) || defined(__ARM_NEON)
+#if MAYA_CPU_ARM64 || MAYA_ISA_NEON
     .neon = true,                  // AArch64 baseline, ARMv7+NEON build
 #endif
 #if defined(__ARM_FEATURE_SVE)
@@ -116,7 +121,7 @@ inline constexpr SimdCaps simd_caps = {
 #if defined(__riscv_v)
     .rvv = true,
 #endif
-#if defined(__ARM_FEATURE_CRC32) || defined(__SSE4_2__)
+#if defined(__ARM_FEATURE_CRC32) || MAYA_ISA_SSE42
     .crc32_hw = true,
 #endif
 };
@@ -136,11 +141,11 @@ static_assert(os != Os::Unknown || arch == Arch::Wasm32,
 // All behavioral branching uses constexpr values above.
 // ============================================================================
 
-#if defined(_WIN32) && !defined(__unix__) && !defined(__CYGWIN__)
+#if MAYA_OS_WINDOWS
     #define MAYA_PLATFORM_WIN32 1
     #define MAYA_PLATFORM_MACOS 0
     #define MAYA_PLATFORM_POSIX 0
-#elif defined(__APPLE__) && defined(__MACH__)
+#elif MAYA_OS_APPLE
     #define MAYA_PLATFORM_WIN32 0
     #define MAYA_PLATFORM_MACOS 1
     #define MAYA_PLATFORM_POSIX 0
@@ -156,7 +161,7 @@ static_assert(os != Os::Unknown || arch == Arch::Wasm32,
 
 // restrict qualifier — optimizer hint for non-aliasing pointers.
 // MSVC spells it __restrict, GCC/Clang spell it __restrict__.
-#if defined(_MSC_VER)
+#if MAYA_CC_MSVC_ABI
     #define MAYA_RESTRICT __restrict
 #else
     #define MAYA_RESTRICT __restrict__
@@ -167,7 +172,7 @@ static_assert(os != Os::Unknown || arch == Arch::Wasm32,
 // equivalent for branch hinting (identity is the correct fallback — the
 // surrounding [[likely]]/[[unlikely]] attributes handle hot-path hinting
 // on C++20 compilers).
-#if defined(_MSC_VER) && !defined(__clang__)
+#if MAYA_CC_MSVC
     #ifndef __builtin_unreachable
         #define __builtin_unreachable() __assume(0)
     #endif
@@ -179,10 +184,10 @@ static_assert(os != Os::Unknown || arch == Arch::Wasm32,
 // Force-inline hint — stronger than [[nodiscard]], used in hot paths.
 // Use MAYA_FORCEINLINE in place of 'inline' for free functions.
 // Use MAYA_ALWAYS_INLINE as an attribute on member functions.
-#if defined(_MSC_VER)
+#if MAYA_CC_MSVC_ABI
     #define MAYA_FORCEINLINE __forceinline
     #define MAYA_ALWAYS_INLINE __forceinline
-#elif defined(__GNUC__) || defined(__clang__)
+#elif MAYA_CC_GNU_EXT
     #define MAYA_FORCEINLINE inline __attribute__((always_inline))
     #define MAYA_ALWAYS_INLINE __attribute__((always_inline))
 #else

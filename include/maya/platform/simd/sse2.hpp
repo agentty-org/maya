@@ -4,7 +4,8 @@
 // SSE2 is guaranteed on ALL x86-64 CPUs. Processes 2 packed cells
 // (128 bits) per comparison. Falls through to scalar for tails.
 
-#if !(defined(__x86_64__) || defined(_M_X64))
+#include "../../core/target.hpp"
+#if !MAYA_CPU_X86_64
 #error "SSE2 header included on non-x86-64 platform"
 #endif
 
@@ -107,7 +108,7 @@ struct Ops<Sse2> {
     [[nodiscard]] static uint64_t hash_row(
         const uint64_t* row, int width) noexcept
     {
-#if defined(__SSE4_2__) || defined(__AVX2__)
+#if MAYA_ISA_SSE42 || MAYA_ISA_AVX2
         uint64_t crc = 0xFFFFFFFFFFFFFFFFULL;
         int i = 0;
         for (; i + 4 <= width; i += 4) {

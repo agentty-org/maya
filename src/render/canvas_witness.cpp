@@ -1,5 +1,6 @@
 // maya::CanvasWitness — Layer 0 implementation. See canvas_witness.hpp.
 
+#include <maya/core/target.hpp>
 #include "maya/render/canvas_witness.hpp"
 
 #include "maya/core/simd.hpp"   // maya::simd::hash_row — cross-platform word hash
@@ -33,7 +34,7 @@
 // hash algorithm is free to differ per arch — CRC32 on one machine, FNV on
 // another. It is never compared across processes or persisted.
 
-#if (defined(__x86_64__) || defined(_M_X64))
+#if MAYA_CPU_X86_64
 #  define MAYA_WITNESS_X86 1
 #  include <nmmintrin.h>   // _mm_crc32_u64 (SSE4.2)
 #else
@@ -50,7 +51,7 @@ namespace {
 // unit is compiled at the baseline -march (GCC/Clang). MSVC always has the
 // intrinsic available under /arch:AVX2 (or SSE4.2 baseline on x64), so no
 // attribute is needed there.
-#if defined(__GNUC__) || defined(__clang__)
+#if MAYA_CC_GNU_EXT
 __attribute__((target("sse4.2")))
 #endif
 std::uint64_t crc32_cells_sse42(const std::uint64_t* cells, std::size_t n) noexcept {
@@ -70,7 +71,7 @@ std::uint64_t crc32_cells_sse42(const std::uint64_t* cells, std::size_t n) noexc
 // GCC/Clang; MSVC on x64 always has SSE4.2 in its baseline so we take the
 // hardware path unconditionally there.
 bool x86_has_crc32() noexcept {
-#if defined(__GNUC__) || defined(__clang__)
+#if MAYA_CC_GNU_EXT
     static const bool ok = __builtin_cpu_supports("sse4.2");
     return ok;
 #else

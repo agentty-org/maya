@@ -1,3 +1,4 @@
+#include <maya/core/target.hpp>
 #include "maya/render/diff.hpp"
 #include "maya/render/canvas_witness.hpp"
 
@@ -6,12 +7,12 @@
 #include <cstdlib>
 #include "maya/style/theme.hpp"
 
-#if defined(__GNUC__) || defined(__clang__)
+#if MAYA_CC_GNU_EXT
 #  define MAYA_PREFETCH_R(addr) __builtin_prefetch((addr), 0, 1)
 #  define MAYA_PREFETCH_W(addr) __builtin_prefetch((addr), 1, 1)
 #  define MAYA_LIKELY(x)   __builtin_expect(!!(x), 1)
 #  define MAYA_UNLIKELY(x) __builtin_expect(!!(x), 0)
-#elif defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+#elif MAYA_CC_MSVC_ABI && (MAYA_CPU_X86_64 || MAYA_CPU_X86_32)
 // MSVC lacks __builtin_prefetch; emit a native SSE prefetch. The GCC hint
 // level we want (1 = "some temporal locality") maps best to _MM_HINT_T2
 // (L3-only), matching the one-touch-per-frame access pattern of Cell rows

@@ -43,6 +43,7 @@
 // The builder takes the width because a widget usually needs to be told
 // how wide it is; if yours does not, ignore the parameter.
 
+#include <maya/core/target.hpp>
 #include <doctest/doctest.h>
 
 #include <maya/element/element.hpp>
@@ -57,7 +58,7 @@
 #include <string>
 #include <vector>
 
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -214,7 +215,7 @@ public:
         // paint into canvases, not to any terminal, so nothing else reads
         // them. (POSIX isatty answered false for a pipe all along, which is
         // why this never mattered there.)
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
         static const char* kIdentity[] = {
             "WT_SESSION", "WT_PROFILE_ID", "ConEmuANSI", "MSYSTEM",
             "TERM_PROGRAM", "TERM", "COLORTERM", "ALACRITTY_WINDOW_ID",

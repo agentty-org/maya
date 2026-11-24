@@ -25,6 +25,7 @@
 
 // maya-level switch: -DMAYA_FORCE_PUBLISHED_MUTEX forces the mutex fallback
 // (a test of that path) without the app naming jaal's macro.
+#include "core/target.hpp"
 #if defined(MAYA_FORCE_PUBLISHED_MUTEX) && !defined(JAAL_FORCE_PUBLISHED_MUTEX)
 #  define JAAL_FORCE_PUBLISHED_MUTEX 1
 #endif
@@ -46,7 +47,7 @@
 #include <jaal/platform/process.hpp>
 #include <jaal/platform/signal.hpp>
 #include <jaal/platform/select.hpp>
-#if !defined(_WIN32)
+#if !MAYA_OS_WINDOWS
 #  include <jaal/platform/posix/process.hpp>
 #  include <jaal/platform/posix/poll_reactor.hpp>
 #endif
@@ -168,7 +169,7 @@ using ::jaal::platform::stream_to;
 using ::jaal::platform::interest;
 using ::jaal::platform::readiness;
 using ::jaal::platform::wait_result;
-#if !defined(_WIN32)
+#if !MAYA_OS_WINDOWS
 using ::jaal::platform::posix_process;
 using ::jaal::platform::poll_reactor;
 #else

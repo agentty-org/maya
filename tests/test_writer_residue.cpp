@@ -11,12 +11,13 @@
 // reader drains a random 1..4096 bytes between writes, so residue is
 // appended to, drained partially, and compacted in every combination.
 
+#include <maya/core/target.hpp>
 #include <maya/maya.hpp>
 #include <maya/terminal/writer.hpp>
 
 #include "agtest.hpp"
 
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -56,7 +57,7 @@ std::string random_frame(std::mt19937& rng) {
 
 TEST_CASE("writer residue: bytes come out whole, in order, never split mid-unit") {
     std::println("--- test_writer_residue ---");
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
     // The property under test is byte-stream integrity across partial
     // writes. Windows anonymous pipes have no O_NONBLOCK: once the 64 KiB
     // buffer fills, WriteFile BLOCKS — so a drain-after-write loop would

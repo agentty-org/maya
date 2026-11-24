@@ -5,7 +5,8 @@
 // 64-bit lane comparison (_mm512_cmpneq_epi64_mask). Falls through
 // to AVX2 for 4-7 remaining cells, then scalar for < 4.
 
-#if !defined(__AVX512F__)
+#include "../../core/target.hpp"
+#if !MAYA_ISA_AVX512F
 #error "AVX512 header included without __AVX512F__ defined"
 #endif
 

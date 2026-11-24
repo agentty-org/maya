@@ -1,17 +1,18 @@
 // Headless render test - verifies layout + paint produce correct canvas output
+#include <maya/core/target.hpp>
 #include <maya/maya.hpp>
 #include <maya/print.hpp>
 #include <maya/render/frame.hpp>
 #include "check.hpp"
 #include "agtest.hpp"
 #include <print>
-#if !defined(_WIN32)
+#if !MAYA_OS_WINDOWS
 #include <fcntl.h>    // ::open for the writer test
 #endif
 #include <string>
 #include <vector>
 
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
 namespace {
 // The writer test needs a writable sink it can open and close around the
 // flush. POSIX names /dev/null; windows names NUL, and the Writer takes a
@@ -336,7 +337,7 @@ TEST_CASE("style transition") {
 TEST_CASE("writer") {
     std::println("--- test_writer ---");
     // Write to the null device to test the pipeline doesn't crash
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
     const auto fd = open_null_sink();
     assert(fd != maya::platform::invalid_handle);
 #else
@@ -350,7 +351,7 @@ TEST_CASE("writer") {
     w.push(render_op::StyleStr{"\x1b[1m"});
     w.push(render_op::CursorShow{});
     auto status = w.flush();
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
     ::CloseHandle(fd);
 #else
     ::close(fd);

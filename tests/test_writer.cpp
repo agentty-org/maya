@@ -1,11 +1,12 @@
 // Tests for the Writer buffered I/O: push, flush, write_raw
+#include <maya/core/target.hpp>
 #include <maya/maya.hpp>
 // NDEBUG guard: CMake builds tests in Release (-O3 -DNDEBUG), which strips
 // assert(). Undefine it here so this file's runtime asserts actually fire.
 #undef NDEBUG
 #include "agtest.hpp"
 #include <print>
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -18,7 +19,7 @@ namespace {
 struct null_sink {
     maya::platform::NativeHandle h;
     explicit null_sink() {
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
         h = ::CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_WRITE, nullptr,
                           OPEN_EXISTING, 0, nullptr);
         assert(h != INVALID_HANDLE_VALUE);
@@ -28,7 +29,7 @@ struct null_sink {
 #endif
     }
     ~null_sink() {
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
         if (h != INVALID_HANDLE_VALUE) ::CloseHandle(h);
 #else
         if (h >= 0) ::close(h);

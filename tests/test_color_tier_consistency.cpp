@@ -25,6 +25,7 @@
 // fact, and every layer must derive it from the same place with the same
 // precedence. These tests state that precedence as executable rules.
 
+#include <maya/core/target.hpp>
 #include <doctest/doctest.h>
 
 #include <maya/style/theme.hpp>
@@ -40,14 +41,14 @@ class EnvVar {
 public:
     EnvVar(const char* key, const char* value) : key_(key) {
         if (const char* old = std::getenv(key)) { had_ = true; old_ = old; }
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
         _putenv_s(key, value ? value : "");
 #else
         if (value) ::setenv(key, value, 1); else ::unsetenv(key);
 #endif
     }
     ~EnvVar() {
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
         _putenv_s(key_.c_str(), had_ ? old_.c_str() : "");
 #else
         if (had_) ::setenv(key_.c_str(), old_.c_str(), 1);

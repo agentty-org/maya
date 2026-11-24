@@ -167,18 +167,21 @@ inline void emergency_signal_handler(int sig) noexcept {
     // Each pass also re-dumps the flight recorder, so the log fills with
     // megabytes of duplicated frames and the real first crash scrolls away.
     //
-    // A plain bool is enough and is async-signal-safe: sig_atomic_t written
-    // once, and a second fatal signal arriving during teardown genuinely
-    // should take the default action rather than restore the tty twice.
-    static volatile std::sig_atomic_t in_handler = 0;
-    if (in_handler) {
+    // An atomic_flag, not `volatile sig_atomic_t`: it is the one type C++
+    // guarantees lock-free, so test_and_set is async-signal-safe, and it
+    // is also right when two threads fault at once (volatile read-then-
+    // write was a race between them; jaal's banlist rejects volatile for
+    // exactly that). A second fatal signal arriving during teardown
+    // genuinely should take the default action rather than restore the
+    // tty twice.
+    static std::atomic_flag in_handler = ATOMIC_FLAG_INIT;
+    if (in_handler.test_and_set()) {
         // Already unwinding a fatal signal. Take the default action now —
         // core dump / correct exit status — instead of recursing.
         (void)std::signal(sig, SIG_DFL);
         (void)::raise(sig);
         _exit(128 + sig);   // belt and braces if the default is ignored
     }
-    in_handler = 1;
 
     emergency_emit();                       // restore tty (async-signal-safe-ish)
     auto& s = emergency_state();

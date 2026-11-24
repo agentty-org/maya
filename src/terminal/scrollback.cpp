@@ -11,6 +11,7 @@
 //   VS Code terminal.integrated.scrollback 1000 · iTerm2 "Scrollback Lines"
 //   1000 · Terminal.app unlimited.
 
+#include <maya/core/target.hpp>
 #include "maya/terminal/scrollback.hpp"
 
 #include <algorithm>
@@ -25,7 +26,7 @@
 
 #include "maya/terminal/tmux.hpp"
 
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
 #  ifndef WIN32_LEAN_AND_MEAN
 #    define WIN32_LEAN_AND_MEAN
 #  endif
@@ -299,9 +300,9 @@ std::optional<Scrollback> windows_terminal(const Ctx& c) {
 // VS Code: "terminal.integrated.scrollback" in the user settings.json.
 std::optional<Scrollback> vscode(const Ctx& c) {
     std::string base;
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
     base = c.env("APPDATA") + "/Code/User/settings.json";
-#elif defined(__APPLE__)
+#elif MAYA_OS_APPLE
     base = c.home() + "/Library/Application Support/Code/User/settings.json";
 #else
     base = c.xdg_config() + "/Code/User/settings.json";
@@ -413,7 +414,7 @@ Term identify(const Ctx& c) {
             return Term::Xfce;
         return Term::Vte;
     }
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
     return Term::WinConsole;
 #else
     return Term::Unknown;
@@ -489,7 +490,7 @@ std::string real_file(const std::string& p) {
     return s;
 }
 
-#if !defined(_WIN32)
+#if !MAYA_OS_WINDOWS
 std::string run(const std::string& cmd) {
     std::FILE* p = ::popen((cmd + " 2>/dev/null").c_str(), "r");
     if (!p) return {};
@@ -509,7 +510,7 @@ bool safe_id(sv s) {
 
 std::string real_ask(const char* what) {
     const sv w{what};
-#if defined(__linux__)
+#if MAYA_OS_LINUX
     if (w == "terminal-process") {
         // Walk up from our parent; the first ancestor that isn't a shell or
         // launcher is the terminal. A few /proc reads, no spawn.
@@ -530,7 +531,7 @@ std::string real_ask(const char* what) {
         return {};
     }
 #endif
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
     if (w == "win-console-buffer-rows") {
         CONSOLE_SCREEN_BUFFER_INFO info{};
         HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -551,7 +552,7 @@ std::string real_ask(const char* what) {
         return run("gsettings get org.gnome.Terminal.Legacy.Profile:/org/gnome/terminal/legacy/profiles:/:"
                    + std::string{id} + "/ " + gkey);
     }
-#  if defined(__APPLE__)
+#  if MAYA_OS_APPLE
     // iTerm2 keeps profiles in "New Bookmarks"; the default one is the entry
     // whose Guid matches "Default Bookmark Guid". One `plutil` call converts
     // the plist to JSON, parsed in iterm() below.

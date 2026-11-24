@@ -46,6 +46,7 @@ for f in $(grep -rl 'jaal' include/maya --include='*.hpp' 2>/dev/null); do
         include/maya/host/*) continue ;;      # the seam itself
         include/maya/runtime.hpp) continue ;; # jaal re-exported for apps
         include/maya/capability.hpp) continue ;; # lock-order types only
+        include/maya/core/target.hpp) continue ;; # jaal's platform facts, re-exported
     esac
     # Strip // comments, then look for real dependencies.
     if sed 's://.*::' "$f" | grep -qE '#[[:space:]]*include[[:space:]]*<jaal|jaal::'; then
@@ -56,7 +57,7 @@ if [ -n "$leaks" ]; then
     fail "these headers depend on jaal outside the seam:"
     for f in $leaks; do echo "          $f"; done
 else
-    echo "  ok    only maya/host/, runtime.hpp and capability.hpp depend on jaal"
+    echo "  ok    only maya/host/, runtime.hpp, capability.hpp and core/target.hpp depend on jaal"
 fi
 
 # 3. The seam is where we say it is.

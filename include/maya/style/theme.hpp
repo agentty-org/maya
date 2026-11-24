@@ -29,6 +29,7 @@
 // point of choosing one: the user has said "paint it like this" and maya
 // then owns the whole surface. They are never a default.
 
+#include "../core/target.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -955,7 +956,7 @@ inline constexpr std::string_view kTrueColorTerms[] = {
 
     if (contains(term, "256color")) return ColorTier::Ansi256;
     if (term.empty()) {
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
         // A native Windows console (cmd.exe / PowerShell under conhost) leaves
         // TERM unset, yet modern conhost — Win10 1607+, which maya's Win32
         // backend already requires and switches into ENABLE_VIRTUAL_TERMINAL_

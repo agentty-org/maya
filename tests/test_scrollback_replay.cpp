@@ -14,6 +14,7 @@
 //      produces the same bytes
 //   6. no source → plain wipe (old behaviour)
 
+#include <maya/core/target.hpp>
 #include "maya/dsl.hpp"
 #include "maya/render/canvas.hpp"
 #include "maya/render/inline_frame.hpp"
@@ -38,7 +39,7 @@ namespace {
 
 std::pair<Writer, int> make_pipe_writer() {
     int fds[2];
-#if defined(__linux__)
+#if MAYA_OS_LINUX
     (void)pipe(fds);
     // The pipe must hold a whole replay frame without blocking.
     (void)fcntl(fds[1], F_SETPIPE_SZ, 1 << 20);

@@ -1,4 +1,5 @@
 // Tests for ANSI escape sequence generation and StyleApplier
+#include <maya/core/target.hpp>
 #include <maya/maya.hpp>
 #include <maya/terminal/tmux.hpp>
 // NDEBUG guard: CMake builds tests in Release (-O3 -DNDEBUG), which strips
@@ -7,7 +8,7 @@
 #include "agtest.hpp"
 #include <cstdlib>   // setenv / unsetenv (tmux sync-detection test)
 #include <print>
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif

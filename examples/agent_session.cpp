@@ -56,6 +56,7 @@
 //
 // Usage:  ./maya_agent_session
 
+#include <maya/core/target.hpp>
 #include <maya/host/run.hpp>
 #include <maya/maya.hpp>
 
@@ -1587,7 +1588,7 @@ static std::string turn_meta_now(int turn_number) {
     // same encoding agentty uses for the header meta strip.
     std::time_t now = std::time(nullptr);
     std::tm     tm{};
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
     localtime_s(&tm, &now);
 #else
     localtime_r(&now, &tm);

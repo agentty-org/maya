@@ -1,6 +1,7 @@
 // maya::tmux — impl. See the header for the capability model and the
 // measured tmux behaviours that motivate it.
 
+#include <maya/core/target.hpp>
 #include "maya/terminal/tmux.hpp"
 #include "maya/terminal/ansi.hpp"
 
@@ -14,7 +15,7 @@
 #include <string_view>
 #include <vector>
 
-#if !defined(_WIN32)
+#if !MAYA_OS_WINDOWS
 #  include <fcntl.h>
 #  include <spawn.h>
 #  include <sys/wait.h>
@@ -73,7 +74,7 @@ bool detect_presence() {
 // returns false there (no $TMUX, no tmux-*/screen-* $TERM), so this is
 // unreachable in practice. Returning "unknown" is exactly the documented
 // failure contract — no behaviour changes, one less process spawn.
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
 std::string ask_tmux(const char* /*format*/) { return {}; }
 #else
 std::string ask_tmux(const char* format) {

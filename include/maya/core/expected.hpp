@@ -5,6 +5,7 @@
 // Error type with source location tracking. No exceptions. No error codes.
 // Just algebraic types composed monadically.
 
+#include "target.hpp"
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
@@ -125,7 +126,7 @@ template <typename T = void>
 
 // GCC/Clang: expression macro using statement expressions.
 // Not available on MSVC — use MAYA_TRY_DECL instead.
-#if defined(__GNUC__) || defined(__clang__)
+#if MAYA_CC_GNU_EXT
 #define MAYA_TRY(expr)                                         \
     ({                                                         \
         auto&& _maya_result = (expr);                          \

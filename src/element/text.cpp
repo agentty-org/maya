@@ -1,8 +1,9 @@
+#include <maya/core/target.hpp>
 #include "maya/element/text.hpp"
 
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#if MAYA_CPU_X86_64 || MAYA_CPU_X86_32
 #  include <immintrin.h>
-#elif defined(__ARM_NEON) || defined(__aarch64__)
+#elif MAYA_ISA_NEON
 #  include <arm_neon.h>
 #endif
 
@@ -100,7 +101,7 @@ int string_width(std::string_view text) noexcept {
         // about to read that byte anyway.
         if (static_cast<unsigned char>(data[pos]) < 0x80
             && static_cast<unsigned char>(data[pos]) >= 0x20) {
-#if defined(__AVX2__)
+#if MAYA_ISA_AVX2
         while (pos + 32 <= len) {
             const __m256i v =
                 _mm256_loadu_si256(reinterpret_cast<const __m256i*>(data + pos));
@@ -114,7 +115,7 @@ int string_width(std::string_view text) noexcept {
             if ((non_ascii | _mm256_movemask_epi8(is_ctl)) != 0) break;
             pos += 32;
         }
-#elif defined(__SSE2__)
+#elif MAYA_ISA_SSE2
         while (pos + 16 <= len) {
             const __m128i v =
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(data + pos));
@@ -123,7 +124,7 @@ int string_width(std::string_view text) noexcept {
             if ((non_ascii | _mm_movemask_epi8(is_ctl)) != 0) break;
             pos += 16;
         }
-#elif defined(__ARM_NEON)
+#elif MAYA_ISA_NEON
         while (pos + 16 <= len) {
             const uint8x16_t v =
                 vld1q_u8(reinterpret_cast<const std::uint8_t*>(data + pos));

@@ -12,6 +12,12 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# What platform this build is for, asked of the C++ headers (jaal decides it
+# once; maya/core/target.hpp re-exports it). Every platform branch below reads
+# MAYA_TARGET_*, never WIN32 / APPLE / UNIX / CMAKE_SYSTEM_NAME.
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/MayaTarget.cmake)
+maya_target_facts()
+
 # Fall back to C++23 when the compiler doesn't advertise C++26 (older Termux
 # clang < 18, gcc < 14). maya uses no C++26-only library facility, so C++23
 # builds cleanly. Matches the same guard on the target_compile_features below.
@@ -96,7 +102,7 @@ if(NOT DEFINED MAYA_HEAVY_OPT)
     endif()
 endif()
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+if(MAYA_TARGET_LINUX AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
    AND MAYA_HEAVY_OPT)
     # LTO across all translation units — lets GCC inline across .cpp boundaries,
     # devirtualize, and eliminate dead code globally. Respect a caller-supplied
@@ -153,7 +159,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
         -Wl,-z,now                   # resolve all symbols at load time (RELRO)
         -Wl,-z,relro                 # read-only relocations
     )
-elseif(APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND MAYA_HEAVY_OPT)
+elseif(MAYA_TARGET_APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND MAYA_HEAVY_OPT)
     # macOS + GCC (Homebrew g++). Same intent as the Linux block — wring
     # the rendering hot paths — but Mach-O, not ELF, so the flag set is the
     # subset that's meaningful here. NO LTO (Apple ld can't consume GCC LTO
@@ -268,7 +274,33 @@ set(MAYA_LIB_SOURCES
     src/widget/html/render.cpp
 )
 
+# ── jaal, and the one decision of what the platform is ────────────────────────
+# The view library below is NOT built on jaal, but it reads the platform from
+# jaal's one decision (jaal/meta/target.hpp, re-exported as maya/core/
+# target.hpp) instead of re-deriving it from _WIN32 / __APPLE__. So jaal is
+# added first, and `maya` links jaal::target -- that header alone, no
+# runtime, no C++26. maya::app (further down) links the whole of jaal.
+option(MAYA_BUILD_APP "Build maya::app (needs C++26 and third_party/jaal)" ON)
+if(NOT EXISTS ${PROJECT_SOURCE_DIR}/third_party/jaal/include/jaal/meta/target.hpp)
+    message(FATAL_ERROR "maya: third_party/jaal is empty. Run: "
+                        "git submodule update --init third_party/jaal")
+endif()
+if(MAYA_BUILD_APP)
+    set(JAAL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    add_subdirectory(third_party/jaal EXCLUDE_FROM_ALL)
+    set(_MAYA_TARGET_LIB jaal::target)
+else()
+    # No jaal build without the app (its CMake floor is higher), but the same
+    # one header, from the same path.
+    add_library(maya_platform_facts INTERFACE)
+    target_include_directories(maya_platform_facts INTERFACE
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/third_party/jaal/include>
+        $<INSTALL_INTERFACE:include>)
+    set(_MAYA_TARGET_LIB maya_platform_facts)
+endif()
+
 add_library(maya ${MAYA_LIB_SOURCES})
+target_link_libraries(maya PUBLIC ${_MAYA_TARGET_LIB})
 # maya uses no C++20/23 modules (no `export module` / `import` anywhere). With
 # CMAKE_CXX_STANDARD 26 and CMake's ninja generator, module dependency scanning
 # is enabled by default — which here is pure overhead AND incorrect: the html/*
@@ -467,8 +499,8 @@ endif()
 # jaal (third_party/jaal) is the runtime; maya is the view layer and the
 # terminal device. The `maya` library knows nothing of jaal; `maya::app`
 # (maya + jaal + <maya/host/run.hpp>) is what a program links. jaal needs C++26.
-# docs/internals/design.md.
-option(MAYA_BUILD_APP "Build maya::app (needs C++26 and third_party/jaal)" ON)
+# docs/internals/design.md. (MAYA_BUILD_APP and the jaal subdirectory are
+# declared above, before the view library.)
 if(MAYA_BUILD_APP)
     # A CMake older than the compiler (CMake 3.31 with AppleClang 21) doesn't
     # LIST cxx_std_26 even though the compiler takes -std=c++2c, so asking
@@ -485,12 +517,7 @@ if(MAYA_BUILD_APP)
         endif()
         set(MAYA_APP_STD_FLAG "-std=c++2c")
     endif()
-    if(NOT EXISTS ${PROJECT_SOURCE_DIR}/third_party/jaal/CMakeLists.txt)
-        message(FATAL_ERROR "maya::app: third_party/jaal is empty. Run: "
-                            "git submodule update --init third_party/jaal")
-    endif()
-    set(JAAL_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-    add_subdirectory(third_party/jaal EXCLUDE_FROM_ALL)
+    # third_party/jaal was added above, before the view library.
     add_library(maya_app INTERFACE)
     add_library(maya::app ALIAS maya_app)
     set_target_properties(maya_app PROPERTIES EXPORT_NAME app)
@@ -601,6 +628,7 @@ if(MAYA_BUILD_TESTS)
         set_target_properties(maya_test PROPERTIES CXX_SCAN_FOR_MODULES OFF)
         target_include_directories(maya_test PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+        target_link_libraries(maya_test PUBLIC ${_MAYA_TARGET_LIB})
         if("cxx_std_26" IN_LIST CMAKE_CXX_COMPILE_FEATURES)
             target_compile_features(maya_test PUBLIC cxx_std_26)
         else()
@@ -796,7 +824,7 @@ set_tests_properties(
     #     SIGINT. Linux-only: it drives POSIX signal/pty surface the macOS
     #     toolchain doesn't expose cleanly from this TU, and the restore
     #     behaviour it guards is platform-identical.
-    if(UNIX)
+    if(MAYA_TARGET_POSIX)
         # The layering rule, as a test: nothing outside include/maya/host/ may
         # depend on jaal. Reads the tree, so it needs no build.
         add_test(NAME seam
@@ -861,6 +889,23 @@ set_tests_properties(
                  COMMAND ${CMAKE_COMMAND} -DROOT=${PROJECT_SOURCE_DIR}
                          -P ${PROJECT_SOURCE_DIR}/tests/lint/layering.cmake)
         set_tests_properties(layering PROPERTIES TIMEOUT 120 LABELS "static")
+        # one_os: jaal decides the platform once (jaal/meta/target.hpp) and
+        # maya re-exports it (core/target.hpp); no other maya file reads a
+        # raw _WIN32 / __APPLE__ / _MSC_VER / __x86_64__. jaal's own lint,
+        # through maya's door (tests/lint/one_os.cmake), which agentty uses too.
+        add_test(NAME one_os
+                 COMMAND ${CMAKE_COMMAND}
+                         "-DROOTS=${PROJECT_SOURCE_DIR}/include;${PROJECT_SOURCE_DIR}/src;${PROJECT_SOURCE_DIR}/tests;${PROJECT_SOURCE_DIR}/examples;${PROJECT_SOURCE_DIR}/bench"
+                         -DSELF=ON
+                         -P ${PROJECT_SOURCE_DIR}/tests/lint/one_os.cmake)
+        set_tests_properties(one_os PROPERTIES TIMEOUT 60 LABELS "static")
+        # ...and the build asks the headers too: no if(WIN32 / APPLE / UNIX)
+        # in a build file (cmake/MayaTarget.cmake).
+        add_test(NAME one_os_cmake
+                 COMMAND ${CMAKE_COMMAND}
+                         "-DFILES=${PROJECT_SOURCE_DIR}/CMakeLists.txt;${PROJECT_SOURCE_DIR}/cmake/MayaTarget.cmake"
+                         -P ${PROJECT_SOURCE_DIR}/tests/lint/one_os_cmake.cmake)
+        set_tests_properties(one_os_cmake PROPERTIES TIMEOUT 60 LABELS "static")
         if(EXISTS ${_MAYA_BANLIST})
             add_test(NAME concurrency_banlist_src
                      COMMAND ${CMAKE_COMMAND}
@@ -901,7 +946,7 @@ set_tests_properties(
         set(_maya_posix_tests test_inline_frame test_composer_caret_shrink
             test_tmux_capabilities test_fresh_oversized_scrollback
             test_scrollback_replay)
-        if(NOT APPLE)
+        if(NOT MAYA_TARGET_APPLE)
             list(APPEND _maya_posix_tests test_terminal_restore)
         endif()
         foreach(tgt ${_maya_posix_tests})
@@ -925,7 +970,7 @@ set_tests_properties(
         add_test(NAME test_terminal_scrollback COMMAND test_terminal_scrollback)
         set_tests_properties(test_terminal_scrollback PROPERTIES TIMEOUT 60)
         # forkpty() needs -lutil on Linux/glibc.
-        if(NOT APPLE)
+        if(NOT MAYA_TARGET_APPLE)
             target_link_libraries(test_terminal_restore PRIVATE util)
         endif()
 
@@ -948,7 +993,7 @@ set_tests_properties(
 
             # host_pty_test drives host_probe in a real pty: keys, a timer that
             # comes and goes, SIGWINCH, quit. Needs pyte; skips without it.
-            if(NOT WIN32)
+            if(NOT MAYA_TARGET_WINDOWS)
                 add_executable(host_probe tests/host_probe.cpp)
                 target_link_libraries(host_probe PRIVATE maya_app)
                 if(MAYA_APP_STD_FLAG)
@@ -1040,7 +1085,9 @@ install(TARGETS maya EXPORT maya-targets)
 # maya::app ships with the jaal it was built against (the submodule), in
 # maya's own export set: find_package(maya) is enough for an app.
 if(TARGET maya_app)
-    install(TARGETS maya_app jaal EXPORT maya-targets FILE_SET HEADERS)
+    install(TARGETS maya_app jaal jaal_target EXPORT maya-targets FILE_SET HEADERS)
+else()
+    install(TARGETS maya_platform_facts EXPORT maya-targets)
 endif()
 install(EXPORT maya-targets
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/maya

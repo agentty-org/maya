@@ -9,7 +9,8 @@
 // Same vector width, same load/store/AND ops; just an extra reduce step
 // on the all-equal check.
 
-#if !(defined(__aarch64__) || defined(_M_ARM64) || defined(__ARM_NEON))
+#include "../../core/target.hpp"
+#if !(MAYA_CPU_ARM64 || MAYA_ISA_NEON)
 #error "NEON header included on platform without NEON support"
 #endif
 
@@ -34,7 +35,7 @@ namespace detail_neon {
 [[nodiscard]] MAYA_FORCEINLINE uint64x2_t vceqq_u64_compat(
     uint64x2_t a, uint64x2_t b) noexcept
 {
-#if defined(__aarch64__) || defined(_M_ARM64)
+#if MAYA_CPU_ARM64
     return vceqq_u64(a, b);
 #else
     uint32x4_t c   = vceqq_u32(vreinterpretq_u32_u64(a),
@@ -51,7 +52,7 @@ namespace detail_neon {
 [[nodiscard]] MAYA_FORCEINLINE bool all_lanes_set_u32x4(
     uint32x4_t v) noexcept
 {
-#if defined(__aarch64__) || defined(_M_ARM64)
+#if MAYA_CPU_ARM64
     return vminvq_u32(v) != 0;
 #else
     uint32x2_t lo = vget_low_u32(v);

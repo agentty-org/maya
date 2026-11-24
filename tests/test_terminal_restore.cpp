@@ -14,6 +14,7 @@
 
 // Self-contained hard assertion that survives -DNDEBUG (CMake may strip
 // assert() in Release).
+#include <maya/core/target.hpp>
 #include <cstdio>
 #include <cstdlib>
 #define CHECK(cond) do {                                                  \
@@ -24,7 +25,7 @@
     }                                                                    \
 } while (0)
 
-#if defined(__unix__) || defined(__APPLE__)
+#if MAYA_OS_POSIX
 
 #include <maya/terminal/terminal.hpp>
 
@@ -36,7 +37,7 @@
 #include <vector>
 
 #include <fcntl.h>
-#if defined(__APPLE__)
+#if MAYA_OS_APPLE
 #  include <util.h>   // forkpty() lives in <util.h> on macOS/BSD
 #else
 #  include <pty.h>    // forkpty() lives in <pty.h> on Linux (glibc)

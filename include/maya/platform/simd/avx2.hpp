@@ -4,7 +4,8 @@
 // Processes 4 packed cells (256 bits) per comparison.
 // Falls through to scalar for remaining elements.
 
-#if !defined(__AVX2__)
+#include "../../core/target.hpp"
+#if !MAYA_ISA_AVX2
 #error "AVX2 header included without __AVX2__ defined"
 #endif
 

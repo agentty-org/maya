@@ -14,6 +14,7 @@ compile_commands.json
 # the build references them by path, so a missing one breaks every clone.
 !tests/lint/*.cmake
 !tests/compile_fail/*.cmake
+!cmake/*.cmake
 Testing/Temporary/LastTestsFailed.log
 Testing/Temporary/LastTest.log
 Testing/Temporary/CTestCostData.txt

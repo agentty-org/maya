@@ -8,6 +8,7 @@
 // theme and half the screen ignores them.
 //
 // So it is checked mechanically, against the source, on every build.
+#include <maya/core/target.hpp>
 #include <maya/maya.hpp>
 #undef NDEBUG
 #include "agtest.hpp"
@@ -572,6 +573,10 @@ TEST_CASE("theme discipline: the Themed gate admits and refuses correctly") {
 #else
     const fs::path cxx = MAYA_CXX_COMPILER;
     const fs::path inc = fs::path{MAYA_SOURCE_DIR} / "include";
+    // maya's headers read the platform from jaal's one decision
+    // (core/target.hpp -> jaal/meta/target.hpp), so a probe TU needs that
+    // include path too, exactly as the `maya` target gets it.
+    const fs::path inc_target = fs::path{MAYA_SOURCE_DIR} / "third_party" / "jaal" / "include";
     const fs::path tu  = fs::temp_directory_path() / "maya_themed_probe.cpp";
 
     // A host token shaped exactly like agentty's ui::Slot: it reaches the
@@ -662,12 +667,12 @@ Color runtime_colour();
         // std::system on windows runs cmd — the probe would fail for a
         // syntax reason that has nothing to do with the type system under
         // test. NUL is the same device on windows.
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
         const std::string nullsink = "2>NUL";
 #else
         const std::string nullsink = "2>/dev/null";
 #endif
-#if defined(_WIN32)
+#if MAYA_OS_WINDOWS
         // std::system runs `cmd /c <string>`. A string that STARTS with a
         // quote trips cmd's /C quote handling: it strips the outer pair and
         // then treats "C:\...\clang++.exe" as a quoted spec it cannot parse
@@ -678,11 +683,13 @@ Color runtime_colour();
         // the C++ string escapes readable.
         const std::string inner = "\"" + cxx.string() + "\"" + sysroot
                                 + "-std=c++26 -fsyntax-only -I \"" + inc.string()
+                                + "\" -I \"" + inc_target.string()
                                 + "\" \"" + tu.string() + "\" " + nullsink;
         const std::string cmd = "\"" + inner + "\"";
 #else
         const std::string cmd = "\"" + cxx.string() + "\"" + sysroot
                               + "-std=c++26 -fsyntax-only -I \"" + inc.string()
+                              + "\" -I \"" + inc_target.string()
                               + "\" \"" + tu.string() + "\" " + nullsink;
 #endif
         const bool compiled = std::system(cmd.c_str()) == 0;

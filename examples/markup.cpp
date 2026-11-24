@@ -27,6 +27,7 @@
 //
 // Keys: ↑/↓ (j/k) scroll · PgUp/PgDn (space) page · Home/End jump · q/Esc quit.
 
+#include <maya/core/target.hpp>
 #include <maya/host/run.hpp>
 #include <maya/maya.hpp>
 #include <maya/widget/html.hpp>
@@ -43,7 +44,7 @@
 #include <variant>
 #include <vector>
 
-#if !defined(_WIN32)
+#if !MAYA_OS_WINDOWS
 #include <sys/ioctl.h>
 #include <unistd.h>
 #endif
@@ -216,7 +217,7 @@ std::vector<Element> flatten_to_lines(const Element& root, int width) {
 
 // Terminal width for the one-shot dump (full columns, or 80 when not a TTY).
 int dump_width() {
-#if !defined(_WIN32)
+#if !MAYA_OS_WINDOWS
     struct winsize ws {};
     if (::ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0)
         return std::max<int>(ws.ws_col, 40);
