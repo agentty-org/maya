@@ -13,16 +13,20 @@
 //   }}.build();
 
 #include <algorithm>
+#include <cstdio>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "../dsl.hpp"
 #include "../element/element.hpp"
+#include "../element/text.hpp"
 #include "../style/border.hpp"
 #include "../style/color.hpp"
 #include "../style/style.hpp"
 #include "file_changes.hpp"
+#include "scrollbar.hpp"
 
 namespace maya {
 
@@ -37,9 +41,19 @@ public:
         // review pane (^R) is for, and 26 rows of it pushed the transcript
         // off the screen.
         bool compact = false;
-        // Full form only: list at most this many files, then "… N more".
-        // 0 = no cap.
+        // Full form: the list is a WINDOW of at most this many rows onto all
+        // the files, scrolled by `scroll` (the first row shown), with an
+        // overlay scrollbar when it doesn't fit. 0 = no window (every row).
         int max_rows = 8;
+        int scroll   = 0;
+        // The row the host's selection is on (-1 = none): drawn with a ▸
+        // marker and kept inside the window by the host's scroll.
+        int selected = -1;
+        // Paths are shown relative to this when it is a prefix ("" = as is).
+        std::string root;
+        // Advertise the scroll keys in the footer (the host binds them while
+        // the strip is focused; omit when it doesn't).
+        bool scroll_keys = true;
 
         // Brand palette
         Color border_color  = Color::slot(ThemeSlot::Warning);
@@ -93,22 +107,123 @@ public:
             text("Ctrl+X", Style{}.with_fg(cfg_.reject_color)),
             text(" reject", Style{}.with_fg(muted))).build(), 2});
 
-        FileChanges fc;
-        // The totals are the header's (all files); the list below may be a
-        // subset, so its own "N files changed" line would state the wrong N.
-        fc.set_summary(false);
-        const std::size_t n = cfg_.changes.size();
-        const std::size_t shown = (cfg_.max_rows > 0)
-            ? std::min(n, static_cast<std::size_t>(cfg_.max_rows)) : n;
-        for (std::size_t i = 0; i < shown; ++i) fc.add(cfg_.changes[i]);
+        const int n   = static_cast<int>(cfg_.changes.size());
+        const int win = (cfg_.max_rows > 0) ? std::min(n, cfg_.max_rows) : n;
+        const int top = std::clamp(cfg_.scroll, 0, std::max(0, n - win));
+        const bool scrolls = win < n;
+
+        // The rows are laid out at the width the strip is given, so paths
+        // are shortened in the MIDDLE (the file name is what you scan for)
+        // and the +/- counts sit in one right-aligned column.
+        int add_w = 0, rm_w = 0;
+        for (const auto& c : cfg_.changes) {
+            add_w = std::max(add_w, digits(c.lines_added));
+            rm_w  = std::max(rm_w,  digits(c.lines_removed));
+        }
+        auto rows = component([cfg = cfg_, top, win, add_w, rm_w, muted](int w, int /*h*/) -> Element {
+            std::vector<Element> out;
+            out.reserve(static_cast<std::size_t>(win));
+            const int counts_w = 2 + 1 + add_w + 2 + 1 + rm_w;   // "  +NNN  −MM"
+            for (int i = top; i < top + win; ++i) {
+                const auto& c = cfg.changes[static_cast<std::size_t>(i)];
+                const bool sel = i == cfg.selected;
+                std::string path = c.path;
+                if (!cfg.root.empty() && path.starts_with(cfg.root)) {
+                    path.erase(0, cfg.root.size());
+                    if (!path.empty() && path.front() == '/') path.erase(0, 1);
+                }
+                const int avail_w = std::max(4, w - 4 - counts_w);
+                // Counts sit one gap after the LONGEST path, not at the far
+                // edge: on a wide terminal the eye had to cross 70 columns of
+                // nothing to pair a file with its +/-.
+                int longest = 0;
+                for (int j = top; j < top + win; ++j) {
+                    std::string pj = cfg.changes[static_cast<std::size_t>(j)].path;
+                    if (!cfg.root.empty() && pj.starts_with(cfg.root)) {
+                        pj.erase(0, cfg.root.size());
+                        if (!pj.empty() && pj.front() == '/') pj.erase(0, 1);
+                    }
+                    longest = std::max(longest, string_width(pj));
+                }
+                const int path_w = std::min(avail_w, longest);
+                if (string_width(path) > path_w) path = truncate_middle(path, path_w);
+                const int pad = std::max(0, path_w - string_width(path));
+                const Color kc = kind_color(c.kind);
+                std::vector<Element> line;
+                line.push_back(text(sel ? "\xe2\x96\xb8 " : "  ",                     // ▸
+                                    Style{}.with_fg(cfg.border_color).with_bold()));
+                line.push_back(text(kind_glyph(c.kind), Style{}.with_fg(kc).with_bold()));
+                line.push_back(text(" "));
+                // The directory dim, the file name bright: the eye finds the
+                // name without reading the path.
+                const auto slash = path.rfind('/');
+                if (slash != std::string::npos && slash + 1 < path.size()) {
+                    line.push_back(text(path.substr(0, slash + 1), Style{}.with_fg(muted)));
+                    line.push_back(text(path.substr(slash + 1),
+                                        sel ? Style{}.with_fg(cfg.text_color).with_bold()
+                                            : Style{}.with_fg(cfg.text_color)));
+                } else {
+                    line.push_back(text(path, Style{}.with_fg(cfg.text_color)));
+                }
+                line.push_back(text(std::string(static_cast<std::size_t>(pad), ' ')));
+                line.push_back(text("  +" + rpad(c.lines_added, add_w),
+                                    c.lines_added ? Style{}.with_fg(cfg.accept_color)
+                                                  : Style{}.with_fg(muted).with_dim()));
+                line.push_back(text("  \xe2\x88\x92" + rpad(c.lines_removed, rm_w),
+                                    c.lines_removed ? Style{}.with_fg(cfg.reject_color)
+                                                    : Style{}.with_fg(muted).with_dim()));
+                out.push_back(h(std::move(line)).build());
+            }
+            return v(std::move(out)).build();
+        });
+
+        // The scrollbar: the same overlay style as maya's panels (half-cell
+        // thumb, no track line beside the border), in the strip's colour.
+        // Only when there is somewhere to scroll; the column is reserved
+        // either way so rows never reflow when the list grows past the
+        // window.
+        Element gutter = text("") | width(1) | height(win);
+        if (scrolls) {
+            // scrollbar_y BORROWS its state for the frame (the renderer writes
+            // the bar's hit-rect back into it during paint), so it can't be a
+            // local here. A component owns one for exactly as long as the
+            // Element lives; the strip has no mouse, so the write-back is
+            // just discarded with it.
+            ScrollbarStyle bar = ScrollbarStyle::overlay();
+            bar.thumb_color = cfg_.border_color;
+            bar.thumb_follows_accent = false;
+            auto st = std::make_shared<ScrollState>();
+            st->max_y = n - win;
+            st->y     = top;
+            gutter = component([st, win, bar](int, int) -> Element {
+                return scrollbar_y(*st, win, bar);
+            }) | width(1) | height(win);
+        }
 
         std::vector<Element> body;
         body.push_back(detail::fit_row(std::move(header)));
-        body.push_back(fc.build());
-        if (shown < n)
-            body.push_back(text("  \xe2\x80\xa6 " + std::to_string(n - shown)
-                                + " more \xc2\xb7 Ctrl+R to review all",
-                                Style{}.with_fg(muted)));
+        body.push_back(h(std::move(rows) | grow(1.0f), std::move(gutter)).build());
+        if (scrolls) {
+            // Where you are, and how to move: the window says nothing about
+            // what's above or below it on its own.
+            std::vector<FitItem> foot;
+            const int above = top, below = n - top - win;
+            std::string where = std::to_string(top + 1) + "\xe2\x80\x93"               // –
+                              + std::to_string(top + win) + " of " + std::to_string(n);
+            std::vector<Element> pos;
+            pos.push_back(text(above ? "\xe2\x86\x91" : " ", Style{}.with_fg(cfg_.border_color)));   // ↑
+            pos.push_back(text(below ? "\xe2\x86\x93" : " ", Style{}.with_fg(cfg_.border_color)));   // ↓
+            pos.push_back(text(" " + where, Style{}.with_fg(muted)));
+            foot.push_back({h(std::move(pos)).build()});
+            foot.push_back({Element{spacer().build()}});
+            if (cfg_.scroll_keys)
+                foot.push_back({h(
+                    text("Alt+\xe2\x86\x91\xe2\x86\x93", Style{}.with_fg(cfg_.text_color)),  // ↑↓
+                    text(" scroll  ", Style{}.with_fg(muted)),
+                    text("Ctrl+R", Style{}.with_fg(cfg_.text_color)),
+                    text(" review all", Style{}.with_fg(muted))).build(), 1});
+            body.push_back(detail::fit_row(std::move(foot)));
+        }
         return (v(std::move(body))
                 | border(BorderStyle::Round)
                 | bcolor(cfg_.border_color)
@@ -118,6 +233,30 @@ public:
 
 private:
     Config cfg_;
+
+    static int digits(int v) { int d = 1; for (v = std::max(0, v); v >= 10; v /= 10) ++d; return d; }
+    static std::string rpad(int v, int w) {
+        std::string s = std::to_string(v);
+        return std::string(static_cast<std::size_t>(std::max(0, w - static_cast<int>(s.size()))), ' ') + s;
+    }
+    static const char* kind_glyph(FileChangeKind k) {
+        switch (k) {
+            case FileChangeKind::Created:  return "+";
+            case FileChangeKind::Deleted:  return "\xe2\x88\x92";   // −
+            case FileChangeKind::Renamed:  return "\xe2\x86\x92";   // →
+            case FileChangeKind::Modified: break;
+        }
+        return "~";
+    }
+    static Color kind_color(FileChangeKind k) {
+        switch (k) {
+            case FileChangeKind::Created:  return Color::slot(ThemeSlot::Success);
+            case FileChangeKind::Deleted:  return Color::slot(ThemeSlot::Error);
+            case FileChangeKind::Renamed:  return Color::slot(ThemeSlot::Info);
+            case FileChangeKind::Modified: break;
+        }
+        return Color::slot(ThemeSlot::Warning);
+    }
 
     // The one-line form. A fit_row like the full header: the count and the
     // totals are essential, the key hints shed (review last) when narrow.
