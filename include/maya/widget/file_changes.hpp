@@ -37,6 +37,7 @@ struct FileChange {
 class FileChanges {
     std::vector<FileChange> changes_;
     bool compact_ = false;
+    bool summary_ = true;
 
     static const char* kind_icon(FileChangeKind k) {
         switch (k) {
@@ -68,6 +69,10 @@ public:
     void add(FileChange fc) { changes_.push_back(std::move(fc)); }
     void clear() { changes_.clear(); }
     void set_compact(bool b) { compact_ = b; }
+    /// Full form: the "N files changed +A -R" line above the list. A host
+    /// that shows a SUBSET of its changes (and the true totals elsewhere)
+    /// turns it off so the line never states the subset as the whole.
+    void set_summary(bool b) { summary_ = b; }
 
     [[nodiscard]] std::size_t size() const { return changes_.size(); }
 
@@ -113,7 +118,7 @@ public:
         std::vector<Element> rows;
 
         // Summary header
-        {
+        if (summary_) {
             std::vector<Element> summary;
             summary.push_back(text(std::to_string(changes_.size()) + " files changed",
                 val.with_bold()));
