@@ -196,10 +196,15 @@ private:
         // width-responsive (greedy line fill), so count its REAL line
         // count at the REAL slot width — under-counting it by one is
         // exactly the off-by-one that pushes the frame into scrollback.
-        const int hint_rows = hint_line_count_(
-            cfg_, std::max(0, (slot_w > 0 ? slot_w : available_width()) - 2));
+        const int content_w = std::max(0, (slot_w > 0 ? slot_w : available_width()) - 2);
+        const int hint_rows = static_cast<int>(
+            layout_hints_(hint_widths_(cfg_), content_w).size());
         const int kEssential = 2 + std::max(1, hint_rows);
-        const bool pixel_sigil = budget >= kEssential + kSigilCh;
+        // The pixel wordmark is kSigilPW columns wide and cannot shrink, so
+        // it needs the WIDTH as well as the height: on a narrow terminal it
+        // was clipped to "agen". Width 0 = not allocated yet; assume it fits.
+        const bool sigil_fits_w = content_w == 0 || content_w >= kSigilPW;
+        const bool pixel_sigil = sigil_fits_w && budget >= kEssential + kSigilCh;
         const int sigil_h = pixel_sigil ? kSigilCh : 1;
         int spare = budget - (kEssential + sigil_h);
         if (spare < 0) spare = 0;
@@ -209,7 +214,9 @@ private:
             ? centered(render_sigil_(age_ms))
             // One-row wordmark fallback — keeps the brand presence on
             // short terminals without the 5-row pixel canvas.
-            : centered_text("\xc2\xbb A G E N T T Y",
+            : centered_text(content_w == 0 || content_w >= 15
+                                ? "\xc2\xbb A G E N T T Y"   // 15 cols, letter-spaced
+                                : "\xc2\xbb AGENTTY",         // 9 cols, very narrow
                             Style{}.with_fg(cfg_.sigil_color).with_bold());
 
         // Blank separators by priority: the ones that carry the most
@@ -349,46 +356,49 @@ private:
     // ──────────────────────────────────────────────────────────────────
     // Responsive hint-row layout.
     // ──────────────────────────────────────────────────────────────────
-    // Greedy line-fill: place the `intro · key label · key label …`
-    // sequence one chip at a time, opening a new centered row whenever
-    // the next chip would overflow the allocated `avail` width. Below
-    // a hard floor (kKeysOnlyFloor cols) labels are dropped so the
-    // chips degrade to `^K · ^J · ^T …`; if even that doesn't fit,
-    // the keys themselves greedily wrap. Width 0 means "layout has
-    // not allocated yet" — we fall back to the single-line form so
-    // the first frame's render is sensible.
-    // Pure row-count mirror of render_hints_'s greedy line fill — the
-    // clamp in build() needs the hint's height BEFORE the component's
-    // deferred render runs. Must stay in lockstep with render_hints_
-    // (same chip widths, same separator width, same wrap rule).
-    [[nodiscard]] static int hint_line_count_(const Config& cfg, int avail) {
-        constexpr int kKeysOnlyFloor = 40;
-        const int sep_w = string_width("  \xc2\xb7  ");
-        const bool drop_labels = avail > 0 && avail < kKeysOnlyFloor;
+    // Hint layout — ONE pure function shared by the height clamp in
+    // build_at() and by render_hints_, so the measured row count and the
+    // painted rows cannot drift apart.
+    //
+    // Greedy line-fill of `intro · key label · key label …`, opening a new
+    // centered row whenever the next chip would overflow `avail`. Labels
+    // are NEVER dropped: a bare `^K · ^J · ^T` row tells a new user
+    // nothing. Instead, when the wrapped hints would exceed kMaxHintLines,
+    // the trailing (least essential) chips are shed whole — the intro and
+    // the first hints (^K palette, which reaches everything) survive.
+    // Width 0 means "layout has not allocated yet" — single line.
+    static constexpr int kMaxHintLines = 4;
+    static constexpr const char* kHintSep = "  \xc2\xb7  ";   // "  ·  "
 
+    [[nodiscard]] static std::vector<int> hint_widths_(const Config& cfg) {
         std::vector<int> widths;
         widths.reserve(cfg.hints.size() + 1);
         if (!cfg.hint_intro.empty())
             widths.push_back(string_width(cfg.hint_intro));
         for (const auto& h_ : cfg.hints)
-            widths.push_back(drop_labels
-                ? string_width(h_.key)
-                : string_width(h_.key) + string_width(h_.label));
+            widths.push_back(string_width(h_.key) + string_width(h_.label));
+        return widths;
+    }
 
+    // Returns chip indices per line (indices into `widths`). Chips that
+    // did not fit within kMaxHintLines are simply absent.
+    [[nodiscard]] static std::vector<std::vector<int>> layout_hints_(
+        const std::vector<int>& widths, int avail)
+    {
+        const int sep_w = string_width(kHintSep);
         const int max_line = (avail > 0) ? avail : (1 << 30);
-        // NOTE: mirrors render_hints_ exactly, including its quirk of
-        // adding the pre-wrap `add` (with sep_w) to the fresh line.
-        int lines = 1, line_w = 0;
-        bool line_empty = true;
-        for (int w : widths) {
-            const int add = w + (line_empty ? 0 : sep_w);
-            if (!line_empty && line_w + add > max_line) {
-                ++lines;
+        std::vector<std::vector<int>> lines;
+        lines.emplace_back();
+        int line_w = 0;
+        for (int i = 0; i < static_cast<int>(widths.size()); ++i) {
+            const int w = widths[static_cast<std::size_t>(i)];
+            if (!lines.back().empty() && line_w + sep_w + w > max_line) {
+                if (static_cast<int>(lines.size()) >= kMaxHintLines) break;
+                lines.emplace_back();
                 line_w = 0;
-                line_empty = true;
             }
-            line_w += add;
-            line_empty = false;
+            line_w += (lines.back().empty() ? 0 : sep_w) + w;
+            lines.back().push_back(i);
         }
         return lines;
     }
@@ -397,12 +407,8 @@ private:
         const Config& cfg, Color muted, int avail)
     {
         using namespace dsl;
-        constexpr int kKeysOnlyFloor = 40;
-        constexpr const char* kSep = "  \xc2\xb7  ";   // "  ·  "
-        const int sep_w = string_width(kSep);
-        const bool drop_labels = avail > 0 && avail < kKeysOnlyFloor;
 
-        struct Chip { Element key; Element label; int width; bool has_label; };
+        struct Chip { Element key; Element label; bool has_label; };
         std::vector<Chip> chips;
         chips.reserve(cfg.hints.size() + 1);
 
@@ -413,47 +419,18 @@ private:
             chips.push_back(Chip{
                 .key       = text(cfg.hint_intro, fg_dim_(muted)),
                 .label     = text(""),
-                .width     = string_width(cfg.hint_intro),
                 .has_label = false,
             });
         }
         for (const auto& h_ : cfg.hints) {
-            Element key = text(h_.key,
-                               Style{}.with_fg(h_.key_color).with_bold());
-            if (drop_labels) {
-                chips.push_back(Chip{
-                    .key       = std::move(key),
-                    .label     = text(""),
-                    .width     = string_width(h_.key),
-                    .has_label = false,
-                });
-            } else {
-                chips.push_back(Chip{
-                    .key       = std::move(key),
-                    .label     = text(h_.label, fg_dim_(muted)),
-                    .width     = string_width(h_.key) + string_width(h_.label),
-                    .has_label = true,
-                });
-            }
+            chips.push_back(Chip{
+                .key       = text(h_.key, Style{}.with_fg(h_.key_color).with_bold()),
+                .label     = text(h_.label, fg_dim_(muted)),
+                .has_label = true,
+            });
         }
 
-        // Single-line fallback when width is unknown (first frame) or
-        // generously wide — also the happy path most users see.
-        const int max_line = (avail > 0) ? avail : (1 << 30);
-
-        std::vector<std::vector<int>> lines;   // chip indices per line
-        lines.emplace_back();
-        int line_w = 0;
-        for (int i = 0; i < static_cast<int>(chips.size()); ++i) {
-            const int add = chips[static_cast<std::size_t>(i)].width
-                          + (lines.back().empty() ? 0 : sep_w);
-            if (!lines.back().empty() && line_w + add > max_line) {
-                lines.emplace_back();
-                line_w = 0;
-            }
-            lines.back().push_back(i);
-            line_w += add;
-        }
+        const auto lines = layout_hints_(hint_widths_(cfg), avail);
 
         std::vector<Element> rendered_lines;
         rendered_lines.reserve(lines.size());
@@ -462,7 +439,7 @@ private:
             parts.reserve(line.size() * 4 + 2);
             parts.push_back(spacer());
             for (std::size_t k = 0; k < line.size(); ++k) {
-                if (k != 0) parts.push_back(text(kSep, fg_dim_(muted)));
+                if (k != 0) parts.push_back(text(kHintSep, fg_dim_(muted)));
                 const auto& c = chips[static_cast<std::size_t>(line[k])];
                 parts.push_back(c.key);
                 if (c.has_label) parts.push_back(c.label);
