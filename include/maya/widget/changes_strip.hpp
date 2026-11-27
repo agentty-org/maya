@@ -269,17 +269,20 @@ private:
 
         // Same grammar as the composer's hint row just below it: bold key,
         // dim label, " · " between clusters, all of it in one run from the
-        // left. The row is indented 2 so the glyph sits in the composer's
-        // text column, not on its border (a coloured ▎ there read as a stray
-        // stub of the box). The hints read the review pane's words, so a
-        // chord means the same thing on both sides of ^R.
+        // left. Boxed like the composer (rounded, its own colour, the same
+        // width) so it reads as a panel of its own rather than loose text
+        // hanging off the transcript; one content row, three rows in all.
+        // The hints read the review pane's words, so a chord means the same
+        // thing on both sides of ^R.
         auto dim = [muted] {
             return theme::is_muted(muted) ? Style{}.with_fg(muted)
                                           : Style{}.with_fg(muted).with_dim();
         };
         auto sep  = [&] { return text(" \xc2\xb7 ", dim()); };              // ·
+        // Key hints sit flush RIGHT, in the review pane's footer grammar
+        // (key, label, three spaces apart); the left side is what changed.
         auto hint = [&](const char* k, const char* l, Color kc) {
-            return h(sep(),
+            return h(text("   "),
                      text(k, Style{}.with_fg(kc).with_bold()),
                      text(l, dim())).build();
         };
@@ -287,7 +290,7 @@ private:
         // Only the glyph and the count are essential. Narrowing sheds, in
         // order: undo all, keep all, the word "changed", review, the totals
         // — so the row never wraps, down to "✎ 26 files".
-        auto lead = h(text("  \xe2\x9c\x8e ", Style{}.with_fg(cfg_.border_color)),   // ✎
+        auto lead = h(text("\xe2\x9c\x8e ", Style{}.with_fg(cfg_.border_color)),   // ✎
                       text(std::to_string(n), Style{}.with_fg(cfg_.text_color).with_bold()),
                       text(n == 1 ? " file" : " files", dim())).build();
         std::vector<Element> totals;
@@ -302,11 +305,15 @@ private:
         row.push_back({std::move(lead)});
         row.push_back({text(" changed", dim()).build(), 4});
         if (!totals.empty()) row.push_back({h(std::move(totals)).build(), 6});
+        row.push_back({Element{spacer().build()}});   // pushes the keys right
         row.push_back({hint("^R", " review",   cfg_.text_color),   5});
         row.push_back({hint("^A", " keep all", cfg_.accept_color), 3});
         row.push_back({hint("^X", " undo all", cfg_.reject_color), 2});
-        row.push_back({Element{spacer().build()}});
-        return detail::fit_row(std::move(row));
+        return (v(detail::fit_row(std::move(row)).build())
+                | border(BorderStyle::Round)
+                | bcolor(cfg_.border_color)
+                | padding(0, 1)
+               ).build();
     }
 };
 
