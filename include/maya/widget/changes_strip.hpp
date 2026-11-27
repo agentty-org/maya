@@ -25,6 +25,7 @@
 #include "../style/border.hpp"
 #include "../style/color.hpp"
 #include "../style/style.hpp"
+#include "../style/theme.hpp"
 #include "file_changes.hpp"
 #include "scrollbar.hpp"
 
@@ -266,27 +267,45 @@ private:
         for (const auto& c : cfg_.changes) { add += c.lines_added; rm += c.lines_removed; }
         const std::size_t n = cfg_.changes.size();
 
-        std::vector<FitItem> row;
-        std::vector<Element> lead;
-        lead.push_back(text("\xe2\x96\x8e ", Style{}.with_fg(cfg_.border_color)));       // ▎
-        lead.push_back(text("\xe2\x9c\x8e ", Style{}.with_fg(cfg_.border_color).with_bold()));  // ✎
-        lead.push_back(text(std::to_string(n) + (n == 1 ? " file" : " files"),
-                            Style{}.with_fg(cfg_.text_color).with_bold()));
+        // Same grammar as the composer's hint row just below it: bold key,
+        // dim label, " · " between clusters, all of it in one run from the
+        // left. The row is indented 2 so the glyph sits in the composer's
+        // text column, not on its border (a coloured ▎ there read as a stray
+        // stub of the box). The hints read the review pane's words, so a
+        // chord means the same thing on both sides of ^R.
+        auto dim = [muted] {
+            return theme::is_muted(muted) ? Style{}.with_fg(muted)
+                                          : Style{}.with_fg(muted).with_dim();
+        };
+        auto sep  = [&] { return text(" \xc2\xb7 ", dim()); };              // ·
+        auto hint = [&](const char* k, const char* l, Color kc) {
+            return h(sep(),
+                     text(k, Style{}.with_fg(kc).with_bold()),
+                     text(l, dim())).build();
+        };
+
+        // Only the glyph and the count are essential. Narrowing sheds, in
+        // order: undo all, keep all, the word "changed", review, the totals
+        // — so the row never wraps, down to "✎ 26 files".
+        auto lead = h(text("  \xe2\x9c\x8e ", Style{}.with_fg(cfg_.border_color)),   // ✎
+                      text(std::to_string(n), Style{}.with_fg(cfg_.text_color).with_bold()),
+                      text(n == 1 ? " file" : " files", dim())).build();
+        std::vector<Element> totals;
+        if (add > 0 || rm > 0) totals.push_back(sep());
         if (add > 0)
-            lead.push_back(text("  +" + std::to_string(add), Style{}.with_fg(cfg_.accept_color)));
+            totals.push_back(text("+" + std::to_string(add), Style{}.with_fg(cfg_.accept_color)));
+        if (add > 0 && rm > 0) totals.push_back(text(" "));
         if (rm > 0)
-            lead.push_back(text("  \xe2\x88\x92" + std::to_string(rm), Style{}.with_fg(cfg_.reject_color)));
-        row.push_back({h(std::move(lead)).build()});
+            totals.push_back(text("\xe2\x88\x92" + std::to_string(rm), Style{}.with_fg(cfg_.reject_color)));
+
+        std::vector<FitItem> row;
+        row.push_back({std::move(lead)});
+        row.push_back({text(" changed", dim()).build(), 4});
+        if (!totals.empty()) row.push_back({h(std::move(totals)).build(), 6});
+        row.push_back({hint("^R", " review",   cfg_.text_color),   5});
+        row.push_back({hint("^A", " keep all", cfg_.accept_color), 3});
+        row.push_back({hint("^X", " undo all", cfg_.reject_color), 2});
         row.push_back({Element{spacer().build()}});
-        row.push_back({h(
-            text("^R", Style{}.with_fg(cfg_.text_color)),
-            text(" review  ", Style{}.with_fg(muted))).build(), 3});
-        row.push_back({h(
-            text("^A", Style{}.with_fg(cfg_.accept_color)),
-            text(" accept  ", Style{}.with_fg(muted))).build(), 2});
-        row.push_back({h(
-            text("^X", Style{}.with_fg(cfg_.reject_color)),
-            text(" reject ", Style{}.with_fg(muted))).build(), 1});
         return detail::fit_row(std::move(row));
     }
 };
