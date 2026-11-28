@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate maya/include/maya/widget/markdown/engine/cm_unicode_table.hpp from
+Generate maya/include/maya/widget/agentty/markdown/engine/cm_unicode_table.hpp from
 pinned UCD data.
 
 CommonMark 0.31.2 needs three pieces of Unicode classification its parser
@@ -18,7 +18,7 @@ Inputs (committed under maya/data/):
   - CaseFolding.txt   — C (common) + F (full) case-fold mappings
 
 Output:
-  - maya/include/maya/widget/markdown/engine/cm_unicode_table.hpp
+  - maya/include/maya/widget/agentty/markdown/engine/cm_unicode_table.hpp
         kPunctRanges       sorted/coalesced P*|S* code-point ranges
         kWhitespaceRanges  sorted/coalesced Zs (+ ASCII ws is handled in C++)
         kCaseFold          sorted {code point -> folded UTF-8} rows

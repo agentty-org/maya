@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <string_view>
 
-#include <maya/widget/markdown.hpp>
+#include <maya/widget/agentty/markdown.hpp>
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // Cap at 64 KiB: beyond that we're testing the allocator, not the parser,

@@ -264,7 +264,7 @@ target_link_libraries(my_app PRIVATE maya::app)    # or maya::maya for the view 
 
 ```cpp
 #include <maya/host/run.hpp>
-#include <maya/widget/markdown.hpp>
+#include <maya/widget/agentty/markdown.hpp>
 ```
 
 ## License

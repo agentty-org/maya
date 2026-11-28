@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate include/maya/widget/markdown/engine/cm_entities_table.hpp from the
+"""Generate include/maya/widget/agentty/markdown/engine/cm_entities_table.hpp from the
 official WHATWG entities.json (CommonMark §6.2 uses the HTML5 named-entity set).
 
 Only the `;`-terminated forms are emitted (the spec requires the trailing
