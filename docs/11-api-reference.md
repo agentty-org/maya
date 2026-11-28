@@ -1390,7 +1390,7 @@ All widgets live in `maya::widget`. Full documentation in [13-widgets.md](13-wid
 | `Image` | `widget/image.hpp` | Terminal image display |
 | `gradient()` | `widget/gradient.hpp` | Color gradient text builder |
 | `Disclosure` | `widget/disclosure.hpp` | Collapsible disclosure section |
-| `Html` | `widget/html.hpp` | Render a safe subset of HTML as styled Elements |
+| `Html` | `widget/agentty/html.hpp` | Render a safe subset of HTML as styled Elements |
 | `Overlay` | `widget/overlay.hpp` | Base layer + one anchored floating element |
 
 ### Overlay

@@ -12,7 +12,7 @@
 #include <string>
 
 #include <maya/core/anim_clock.hpp>
-#include <maya/widget/markdown.hpp>
+#include <maya/widget/agentty/markdown.hpp>
 
 using maya::StreamingMarkdown;
 

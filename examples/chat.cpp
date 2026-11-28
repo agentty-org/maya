@@ -29,10 +29,10 @@
 #include <maya/widget/diff_view.hpp>
 #include <maya/widget/edit_tool.hpp>
 #include <maya/widget/fetch_tool.hpp>
-#include <maya/widget/markdown.hpp>
+#include <maya/widget/agentty/markdown.hpp>
 #include <maya/widget/message.hpp>
-#include <maya/widget/permission.hpp>
-#include <maya/widget/plan_view.hpp>
+#include <maya/widget/agentty/permission.hpp>
+#include <maya/widget/agentty/plan_view.hpp>
 #include <maya/widget/read_tool.hpp>
 #include <maya/widget/search_result.hpp>
 #include <maya/widget/thinking.hpp>

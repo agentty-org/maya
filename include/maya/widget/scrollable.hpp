@@ -21,7 +21,7 @@
 #include "../style/style.hpp"
 #include "../style/color.hpp"
 #include "../terminal/input.hpp"
-#include "scrollbar.hpp"
+#include "agentty/scrollbar.hpp"
 
 #include <algorithm>
 #include <string>

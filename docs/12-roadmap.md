@@ -36,7 +36,7 @@ The following features from the original roadmap have been fully implemented:
 
 ### Tier 3 — Rich Content ✅
 
-- **Markdown Rendering** — `src/widget/markdown/`: full renderer supporting headers, code blocks (fenced), ordered/unordered lists, links (OSC 8 hyperlinks), bold/italic emphasis, and tables
+- **Markdown Rendering** — `src/widget/agentty/markdown/`: full renderer supporting headers, code blocks (fenced), ordered/unordered lists, links (OSC 8 hyperlinks), bold/italic emphasis, and tables
 
 ### Tier 4 — Motion, Layering, Partial Updates & Highlighting ✅
 
@@ -117,7 +117,7 @@ actually built.
 
 ### Themeable syntax highlighting
 
-`#include <maya/widget/markdown/highlight.hpp>` — namespace `maya::syntax`.
+`#include <maya/widget/agentty/markdown/highlight.hpp>` — namespace `maya::syntax`.
 
 Tokenizing returns a flat, sorted, non-overlapping span stream over the source
 (gaps are implicitly `Capture::None`). A `HighlightTheme` maps each `Capture`

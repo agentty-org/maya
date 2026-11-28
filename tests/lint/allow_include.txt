@@ -49,7 +49,7 @@ render/canvas.hpp: thread_local
 render/wire_row.hpp: thread_local
 platform/posix/terminal.hpp: thread_local
 platform/macos/terminal.hpp: thread_local
-widget/markdown/parser_internal.hpp: thread_local
+widget/agentty/markdown/parser_internal.hpp: thread_local
 # viewport fit: recent column plans, keyed by the host's content key and
 # width. Called from layout with no kernel in scope.
 element/grid.hpp: thread_local
@@ -78,7 +78,7 @@ terminal/input.hpp: atomic
 # ── The markdown async result slot ───────────────────────────────────────
 # The parse itself runs on maya::exec (jaal's pool); markdown.hpp keeps the
 # slot the job publishes into, behind a mutex and a ready flag.
-widget/markdown.hpp: atomic mutex
+widget/agentty/markdown.hpp: atomic mutex
 
 # ── P4. Pixel style memo ─────────────────────────────────────────────────
 # ── P4. Pixel style memo ───────────────────────────────────────────────────────────────────────────────
@@ -114,5 +114,5 @@ runtime.hpp: cap_mint loop_arm
 platform/io.hpp: const_cast
 widget/input.hpp: const_cast thread_local
 widget/scrollable.hpp: const_cast
-widget/scrollbar.hpp: const_cast
+widget/agentty/scrollbar.hpp: const_cast
 widget/tree.hpp: const_cast

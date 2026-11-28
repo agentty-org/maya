@@ -45,8 +45,8 @@
 
 #include <maya/host/run.hpp>
 #include <maya/maya.hpp>
-#include <maya/widget/overlay.hpp>
-#include <maya/widget/scrollbar.hpp>
+#include <maya/widget/agentty/overlay.hpp>
+#include <maya/widget/agentty/scrollbar.hpp>
 
 #include <algorithm>
 #include <array>

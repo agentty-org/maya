@@ -6,13 +6,13 @@
 #include <maya/maya.hpp>
 #include <maya/widget/badge.hpp>
 #include <maya/widget/breadcrumb.hpp>
-#include <maya/widget/divider.hpp>
+#include <maya/widget/agentty/divider.hpp>
 #include <maya/widget/input.hpp>
-#include <maya/widget/markdown.hpp>
+#include <maya/widget/agentty/markdown.hpp>
 #include <maya/widget/modal.hpp>
 #include <maya/widget/progress.hpp>
 #include <maya/widget/select.hpp>
-#include <maya/widget/spinner.hpp>
+#include <maya/widget/agentty/spinner.hpp>
 #include <maya/widget/table.hpp>
 #include <maya/widget/toast.hpp>
 // NDEBUG guard: CMake builds tests in Release (-O3 -DNDEBUG), which strips

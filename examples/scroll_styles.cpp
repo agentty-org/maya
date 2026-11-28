@@ -6,7 +6,7 @@
 // scroll; every tile updates in lock-step.
 //
 // To add a custom style, define a static factory on ScrollbarStyle in
-// widget/scrollbar.hpp (5 lines) and append it to kPresets below.
+// widget/agentty/scrollbar.hpp (5 lines) and append it to kPresets below.
 //
 // To build a fully custom scrollbar widget (gradient thumb, percentage
 // label, click-to-jump, etc.), skip ScrollbarStyle entirely:
@@ -21,7 +21,7 @@
 
 #include <maya/host/run.hpp>
 #include <maya/maya.hpp>
-#include <maya/widget/scrollbar.hpp>
+#include <maya/widget/agentty/scrollbar.hpp>
 
 #include <array>
 #include <string>

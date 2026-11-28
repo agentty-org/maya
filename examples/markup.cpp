@@ -30,9 +30,9 @@
 #include <maya/core/target.hpp>
 #include <maya/host/run.hpp>
 #include <maya/maya.hpp>
-#include <maya/widget/html.hpp>
-#include <maya/widget/markdown.hpp>
-#include <maya/widget/scrollbar.hpp>
+#include <maya/widget/agentty/html.hpp>
+#include <maya/widget/agentty/markdown.hpp>
+#include <maya/widget/agentty/scrollbar.hpp>
 #include <maya/render/diff.hpp>  // detail::encode_utf8
 
 #include <algorithm>

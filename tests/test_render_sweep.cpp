@@ -19,7 +19,7 @@
 
 #include "render_sweep.hpp"
 
-#include <maya/widget/panel.hpp>
+#include <maya/widget/agentty/panel.hpp>
 #include <maya/dsl.hpp>
 
 #include <string>

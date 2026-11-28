@@ -12,7 +12,7 @@
 #include <string_view>
 #include <type_traits>
 
-#include "../core/types.hpp"
+#include "types.hpp"
 #include "../style/color.hpp"
 
 namespace maya {

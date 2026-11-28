@@ -18,8 +18,8 @@
 #include <string_view>
 #include <vector>
 
-#include "maya/widget/markdown.hpp"
-#include "maya/widget/markdown/engine/cm_engine.hpp"  // pure-core parse (no ext)
+#include "maya/widget/agentty/markdown.hpp"
+#include "maya/widget/agentty/markdown/engine/cm_engine.hpp"  // pure-core parse (no ext)
 #include "cm_html.hpp"
 #include "check.hpp"
 

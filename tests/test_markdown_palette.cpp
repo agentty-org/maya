@@ -25,8 +25,8 @@
 
 #include <maya/style/schemes.hpp>
 #include <maya/style/theme.hpp>
-#include <maya/widget/markdown.hpp>
-#include <maya/widget/markdown/internal.hpp>
+#include <maya/widget/agentty/markdown.hpp>
+#include <maya/widget/agentty/markdown/internal.hpp>
 
 #include <atomic>
 #include <print>

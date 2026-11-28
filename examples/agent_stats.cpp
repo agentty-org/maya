@@ -27,21 +27,21 @@
 #include <maya/host/run.hpp>
 #include <maya/maya.hpp>
 #include <maya/element/grid.hpp>
-#include <maya/widget/bar_chart.hpp>
-#include <maya/widget/context_gauge.hpp>
-#include <maya/widget/donut.hpp>
+#include <maya/widget/agentty/bar_chart.hpp>
+#include <maya/widget/agentty/context_gauge.hpp>
+#include <maya/widget/agentty/donut.hpp>
 #include <maya/widget/empty_state.hpp>
 #include <maya/widget/gauge.hpp>
 #include <maya/widget/heatmap.hpp>
-#include <maya/widget/histogram.hpp>
-#include <maya/widget/line_chart.hpp>
-#include <maya/widget/model_badge.hpp>
+#include <maya/widget/agentty/histogram.hpp>
+#include <maya/widget/agentty/line_chart.hpp>
+#include <maya/widget/agentty/model_badge.hpp>
 #include <maya/widget/progress_ring.hpp>
-#include <maya/widget/scrollbar.hpp>
-#include <maya/widget/sparkline.hpp>
-#include <maya/widget/tab_strip.hpp>
+#include <maya/widget/agentty/scrollbar.hpp>
+#include <maya/widget/agentty/sparkline.hpp>
+#include <maya/widget/agentty/tab_strip.hpp>
 #include <maya/widget/table.hpp>
-#include <maya/widget/token_stream_sparkline.hpp>
+#include <maya/widget/agentty/token_stream_sparkline.hpp>
 
 using namespace maya;
 using namespace maya::dsl;

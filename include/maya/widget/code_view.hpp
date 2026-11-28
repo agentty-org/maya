@@ -32,7 +32,7 @@
 #include "../style/color.hpp"
 #include "../style/style.hpp"
 #include "../text/unicode_width.hpp"
-#include "markdown/highlight.hpp"
+#include "agentty/markdown/highlight.hpp"
 
 namespace maya {
 

@@ -40,11 +40,11 @@
 // depend on anyone guessing which one.
 
 #include <maya/maya.hpp>
-#include <maya/widget/status_bar.hpp>
-#include <maya/widget/composer.hpp>
-#include <maya/widget/model_badge.hpp>
+#include <maya/widget/agentty/status_bar.hpp>
+#include <maya/widget/agentty/composer.hpp>
+#include <maya/widget/agentty/model_badge.hpp>
 #include <maya/widget/shortcut_row.hpp>
-#include <maya/widget/token_stream_sparkline.hpp>
+#include <maya/widget/agentty/token_stream_sparkline.hpp>
 #include <maya/text/unicode_width.hpp>
 
 #include <print>

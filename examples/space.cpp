@@ -20,12 +20,12 @@
 #include <chrono>
 #include <variant>
 #include <maya/widget/badge.hpp>
-#include <maya/widget/bar_chart.hpp>
+#include <maya/widget/agentty/bar_chart.hpp>
 #include <maya/widget/callout.hpp>
 #include <maya/widget/gauge.hpp>
 #include <maya/widget/heatmap.hpp>
-#include <maya/widget/line_chart.hpp>
-#include <maya/widget/sparkline.hpp>
+#include <maya/widget/agentty/line_chart.hpp>
+#include <maya/widget/agentty/sparkline.hpp>
 
 #include <algorithm>
 #include <array>

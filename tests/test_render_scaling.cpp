@@ -25,8 +25,8 @@
 #include <maya/maya.hpp>
 #include <maya/render/renderer.hpp>
 #include <maya/render/serialize.hpp>   // content_height
-#include <maya/widget/agent_timeline.hpp>
-#include <maya/widget/tool_body_preview.hpp>
+#include <maya/widget/agentty/agent_timeline.hpp>
+#include <maya/widget/agentty/tool_body_preview.hpp>
 
 #include <algorithm>
 #include <atomic>

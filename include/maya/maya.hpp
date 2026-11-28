@@ -49,7 +49,7 @@
 // Widgets are NOT included here. Include them individually as needed:
 //
 //   #include <maya/widget/input.hpp>
-//   #include <maya/widget/markdown.hpp>
+//   #include <maya/widget/agentty/markdown.hpp>
 //   #include <maya/widget/scrollable.hpp>
 //   ...
 //

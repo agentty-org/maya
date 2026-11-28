@@ -19,7 +19,7 @@
 
 #include <chrono>
 #include <variant>
-#include <maya/widget/sparkline.hpp>
+#include <maya/widget/agentty/sparkline.hpp>
 
 #include <algorithm>
 #include <array>

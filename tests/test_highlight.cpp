@@ -1,6 +1,6 @@
 // Tests for maya::syntax — themeable highlight: capture spans + constexpr theme.
 #include <maya/maya.hpp>
-#include <maya/widget/markdown/highlight.hpp>
+#include <maya/widget/agentty/markdown/highlight.hpp>
 // NDEBUG guard: CMake builds tests in Release (-O3 -DNDEBUG), which strips
 // assert(). Undefine it here so this file's runtime asserts actually fire.
 #undef NDEBUG

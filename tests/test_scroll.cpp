@@ -16,7 +16,7 @@
 
 #include <maya/maya.hpp>
 #include <maya/widget/scrollable.hpp>
-#include <maya/widget/scrollbar.hpp>
+#include <maya/widget/agentty/scrollbar.hpp>
 
 #include "agtest.hpp"
 #include <print>

@@ -4,7 +4,7 @@
 #include "maya/dsl.hpp"
 #include "maya/render/scrollback_replay.hpp"
 #include "maya/style/theme.hpp"
-#include "maya/widget/markdown.hpp"
+#include "maya/widget/agentty/markdown.hpp"
 
 #include <chrono>
 #include <cstdlib>

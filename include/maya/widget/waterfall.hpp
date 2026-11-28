@@ -18,7 +18,7 @@
 
 #include "../dsl.hpp"
 #include "../style/style.hpp"
-#include "plan_view.hpp"  // TaskStatus
+#include "agentty/plan_view.hpp"  // TaskStatus
 
 namespace maya {
 

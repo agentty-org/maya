@@ -17,7 +17,7 @@
 
 #include <maya/host/run.hpp>
 #include <maya/maya.hpp>
-#include <maya/widget/scrollbar.hpp>
+#include <maya/widget/agentty/scrollbar.hpp>
 
 #include <array>
 #include <optional>

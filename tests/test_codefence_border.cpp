@@ -13,8 +13,8 @@
 // output.
 
 #include <maya/maya.hpp>
-#include <maya/widget/markdown.hpp>
-#include <maya/widget/turn.hpp>
+#include <maya/widget/agentty/markdown.hpp>
+#include <maya/widget/agentty/turn.hpp>
 #include <cassert>
 #include <print>
 #include <string>

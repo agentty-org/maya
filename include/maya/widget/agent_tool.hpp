@@ -24,7 +24,7 @@
 #include "../dsl.hpp"
 #include "../style/border.hpp"
 #include "../style/style.hpp"
-#include "spinner.hpp"
+#include "agentty/spinner.hpp"
 
 namespace maya {
 

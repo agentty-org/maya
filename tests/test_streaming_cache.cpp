@@ -14,7 +14,7 @@
 //   - settle_drops_empty_tail_slot  (the "stray empty bordered box")
 //   - byte_by_byte_settle_matches_full_feed (cache-shape regression sweep)
 
-#include "maya/widget/markdown.hpp"
+#include "maya/widget/agentty/markdown.hpp"
 #include "maya/element/element.hpp"
 #include "maya/element/text.hpp"   // string_width
 #include "check.hpp"

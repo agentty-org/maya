@@ -25,7 +25,7 @@
 // chain (Fresh render → Synced diff render) into a byte pipe, and feed
 // those bytes through a compact VT emulator.
 #include <maya/maya.hpp>
-#include <maya/widget/composer.hpp>
+#include <maya/widget/agentty/composer.hpp>
 #include <maya/render/inline_frame.hpp>
 #include <maya/render/renderer.hpp>
 #include <maya/render/serialize.hpp>

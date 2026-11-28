@@ -29,7 +29,7 @@
 #include "../element/text.hpp"
 #include "../style/color.hpp"
 #include "../style/style.hpp"
-#include "markdown/highlight.hpp"
+#include "agentty/markdown/highlight.hpp"
 
 namespace maya {
 

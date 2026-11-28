@@ -31,7 +31,7 @@
 // (the cursor), which is what the byte clip — and thus everything visible —
 // derives from.
 
-#include <maya/widget/markdown.hpp>
+#include <maya/widget/agentty/markdown.hpp>
 #include <maya/core/anim_clock.hpp>
 
 #include <print>

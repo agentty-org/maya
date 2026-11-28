@@ -44,8 +44,8 @@ namespace {
 // entry here: an exemption that travels with the colour cannot go stale,
 // and states its reason where the next reader is already looking.
 const std::vector<std::string> kAllowed = {
-    "widget/markdown/highlight.hpp",
-    "widget/markdown/render/highlight.cpp",
+    "widget/agentty/markdown/highlight.hpp",
+    "widget/agentty/markdown/render/highlight.cpp",
     "widget/file_tree.hpp",
     "widget/editor_tab_bar.hpp",
 };

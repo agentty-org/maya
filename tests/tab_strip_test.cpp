@@ -19,7 +19,7 @@
 #include <maya/render/canvas.hpp>
 #include <maya/render/renderer.hpp>
 #include <maya/style/theme.hpp>
-#include <maya/widget/tab_strip.hpp>
+#include <maya/widget/agentty/tab_strip.hpp>
 
 #include <cstdio>
 #include <string>

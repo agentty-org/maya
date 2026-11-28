@@ -36,7 +36,7 @@
 // Links maya only (header-driven StreamingMarkdown), same as
 // reveal_pacing_test.
 
-#include "maya/widget/markdown.hpp"
+#include "maya/widget/agentty/markdown.hpp"
 
 #include <chrono>
 #include <cstdio>

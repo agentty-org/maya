@@ -11,8 +11,8 @@
 // carry cross-line lexer state, plus plain code, and assert equivalence.
 
 #include <maya/maya.hpp>
-#include <maya/widget/markdown/internal.hpp>
-#include <maya/widget/markdown.hpp>
+#include <maya/widget/agentty/markdown/internal.hpp>
+#include <maya/widget/agentty/markdown.hpp>
 
 #include "agtest.hpp"
 #include <print>

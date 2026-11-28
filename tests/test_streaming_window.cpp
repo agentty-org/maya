@@ -26,7 +26,7 @@
 
 static int g_failed = 0;
 
-#include "maya/widget/markdown.hpp"
+#include "maya/widget/agentty/markdown.hpp"
 #include "maya/core/render_context.hpp"
 #include "maya/render/renderer.hpp"
 #include "maya/render/canvas.hpp"

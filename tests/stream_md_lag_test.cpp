@@ -40,7 +40,7 @@
 // stay stable across machines/CI. The point is to catch an ORDER-OF-MAGNITUDE
 // per-frame cost growth, which is what the user feels as lag.
 
-#include "maya/widget/markdown.hpp"
+#include "maya/widget/agentty/markdown.hpp"
 #include "maya/element/element.hpp"
 #include "maya/core/anim_clock.hpp"
 

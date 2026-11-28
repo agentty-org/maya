@@ -41,8 +41,8 @@ render/paint_box.cpp: thread_local
 render/paint_component.cpp: thread_local
 render/scrollback_ledger.cpp: thread_local
 terminal/tmux.cpp: thread_local mutex
-widget/markdown/parser/parser_inline.cpp: thread_local
-widget/markdown/streaming/markdown_memo.cpp: thread_local
+widget/agentty/markdown/parser/parser_inline.cpp: thread_local
+widget/agentty/markdown/streaming/markdown_memo.cpp: thread_local
 
 # ── P2. Immutable publish behind an atomic ───────────────────────────────
 # The markdown palette and the theme were 35+ plain mutable globals written
@@ -62,14 +62,14 @@ render/canvas.cpp: atomic mutex
 terminal/input.cpp: atomic
 render/renderer.cpp: atomic thread_local
 render/render_internal.hpp: atomic thread_local
-widget/markdown/render/syntax_highlight.cpp: atomic thread_local
+widget/agentty/markdown/render/syntax_highlight.cpp: atomic thread_local
 
 # ── P3. The markdown async result slot ───────────────────────────────────
 # The big-document parse runs on maya::exec (jaal's pool under maya::run, so
 # maya starts no thread). The widget keeps a mutex around the one slot the
 # job publishes its result into: a handoff, not a runtime.
-widget/markdown/streaming/async.cpp: const_cast mutex
-widget/markdown/streaming/commit.cpp: mutex
+widget/agentty/markdown/streaming/async.cpp: const_cast mutex
+widget/agentty/markdown/streaming/commit.cpp: mutex
 
 # ── maya::exec install ───────────────────────────────────────────────────
 # The executor hook (core/executor.hpp) is set by maya::run before the program
@@ -88,6 +88,6 @@ core/executor.cpp: mutex
 # Each of these mutates a memo (link refs, reveal state, layout cache) under
 # the widget's own mutex or on the loop thread alone. Called out here so a
 # const_cast that DOES break a shared frozen value has to argue for itself.
-widget/markdown/streaming/build.cpp: const_cast
-widget/markdown/streaming/render_tail.cpp: const_cast
-widget/markdown/render/syntax_lang.cpp: const_cast thread_local
+widget/agentty/markdown/streaming/build.cpp: const_cast
+widget/agentty/markdown/streaming/render_tail.cpp: const_cast
+widget/agentty/markdown/render/syntax_lang.cpp: const_cast thread_local

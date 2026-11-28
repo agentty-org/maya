@@ -50,7 +50,7 @@
 //   • a stale-cell survivor from before the cache activated.
 
 #include <maya/maya.hpp>
-#include <maya/widget/agent_timeline.hpp>
+#include <maya/widget/agentty/agent_timeline.hpp>
 #include <cassert>
 #include <cstdint>
 #include <cstdio>

@@ -31,7 +31,7 @@
 #include <maya/render/grid_emit.hpp>
 #include <maya/render/renderer.hpp>
 #include <maya/render/serialize.hpp>
-#include <maya/widget/markdown.hpp>
+#include <maya/widget/agentty/markdown.hpp>
 
 #include <algorithm>
 #include <cstdio>

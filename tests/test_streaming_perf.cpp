@@ -25,7 +25,7 @@
 static int g_failed = 0;
 
 #include <maya/maya.hpp>
-#include <maya/widget/markdown.hpp>
+#include <maya/widget/agentty/markdown.hpp>
 
 #include <algorithm>
 #include <chrono>

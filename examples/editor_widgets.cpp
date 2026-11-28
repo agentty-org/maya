@@ -15,7 +15,7 @@
 #include <maya/widget/editor_tab_bar.hpp>
 #include <maya/widget/breadcrumb_bar.hpp>
 #include <maya/widget/symbol_outline.hpp>
-#include <maya/widget/completion_menu.hpp>
+#include <maya/widget/agentty/completion_menu.hpp>
 #include <maya/widget/signature_help.hpp>
 #include <maya/widget/command_palette_bar.hpp>
 #include <maya/widget/search_results.hpp>

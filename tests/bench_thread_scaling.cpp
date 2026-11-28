@@ -18,8 +18,8 @@
 // rising µs/turn ⇒ a real superlinear regression.
 
 #include <maya/maya.hpp>
-#include <maya/widget/markdown.hpp>
-#include <maya/widget/tool_body_preview.hpp>
+#include <maya/widget/agentty/markdown.hpp>
+#include <maya/widget/agentty/tool_body_preview.hpp>
 #include <maya/render/cache_id.hpp>
 #include <maya/style/style.hpp>
 

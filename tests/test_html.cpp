@@ -8,8 +8,8 @@
 #include <string_view>
 #include <variant>
 
-#include "maya/widget/html.hpp"
-#include "maya/widget/markdown.hpp"
+#include "maya/widget/agentty/html.hpp"
+#include "maya/widget/agentty/markdown.hpp"
 #include "maya/element/element.hpp"
 #include "maya/element/box.hpp"
 #include "maya/element/text.hpp"

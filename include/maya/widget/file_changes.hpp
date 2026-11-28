@@ -17,22 +17,9 @@
 
 #include "../dsl.hpp"
 #include "../style/style.hpp"
+#include "agentty/file_change.hpp"   // FileChange, FileChangeKind
 
 namespace maya {
-
-enum class FileChangeKind : uint8_t {
-    Created,
-    Modified,
-    Deleted,
-    Renamed,
-};
-
-struct FileChange {
-    std::string    path;
-    FileChangeKind kind        = FileChangeKind::Modified;
-    int            lines_added = 0;
-    int            lines_removed = 0;
-};
 
 class FileChanges {
     std::vector<FileChange> changes_;

@@ -22,7 +22,7 @@
 #include <maya/maya.hpp>
 #include <maya/widget/badge.hpp>
 #include <maya/widget/breadcrumb.hpp>
-#include <maya/widget/sparkline.hpp>
+#include <maya/widget/agentty/sparkline.hpp>
 #include <maya/widget/progress.hpp>
 
 #include <algorithm>

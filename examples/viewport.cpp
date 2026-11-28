@@ -30,9 +30,9 @@
 #include <maya/host/run.hpp>
 #include <maya/maya.hpp>
 #include <maya/element/grid.hpp>          // viewport(), columns(), grid()
-#include <maya/widget/bar_chart.hpp>
+#include <maya/widget/agentty/bar_chart.hpp>
 #include <maya/widget/gauge.hpp>
-#include <maya/widget/scrollbar.hpp>      // scrollbar_y, ScrollbarStyle
+#include <maya/widget/agentty/scrollbar.hpp>      // scrollbar_y, ScrollbarStyle
 
 using namespace maya;
 using namespace maya::dsl;

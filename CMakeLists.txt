@@ -250,35 +250,35 @@ set(MAYA_LIB_SOURCES
     src/render/canvas_witness.cpp
     src/render/scrollback_ledger.cpp
     src/render/scrollback_replay.cpp
-    src/widget/panel.cpp
+    src/widget/agentty/panel.cpp
     # markdown widget — three modules: parser / render / streaming
-    # (component layout: src/widget/markdown/LAYOUT.md)
-    src/widget/markdown/parser/parser_inline.cpp
-    src/widget/markdown/parser/parser_block.cpp
-    src/widget/markdown/parser/text_transform.cpp
+    # (component layout: src/widget/agentty/markdown/LAYOUT.md)
+    src/widget/agentty/markdown/parser/parser_inline.cpp
+    src/widget/agentty/markdown/parser/parser_block.cpp
+    src/widget/agentty/markdown/parser/text_transform.cpp
     # CommonMark engine — spec-faithful two-phase core
-    src/widget/markdown/engine/cm_block.cpp
-    src/widget/markdown/engine/cm_inline.cpp
-    src/widget/markdown/render/render_inline.cpp
-    src/widget/markdown/render/render_block.cpp
-    src/widget/markdown/render/syntax_lang.cpp
-    src/widget/markdown/render/syntax_highlight.cpp
-    src/widget/markdown/render/highlight.cpp
+    src/widget/agentty/markdown/engine/cm_block.cpp
+    src/widget/agentty/markdown/engine/cm_inline.cpp
+    src/widget/agentty/markdown/render/render_inline.cpp
+    src/widget/agentty/markdown/render/render_block.cpp
+    src/widget/agentty/markdown/render/syntax_lang.cpp
+    src/widget/agentty/markdown/render/syntax_highlight.cpp
+    src/widget/agentty/markdown/render/highlight.cpp
     # streaming module — one concern per TU
-    src/widget/markdown/streaming/markdown_memo.cpp
-    src/widget/markdown/streaming/boundary.cpp
-    src/widget/markdown/streaming/commit.cpp
-    src/widget/markdown/streaming/render_tail.cpp
-    src/widget/markdown/streaming/build.cpp
-    src/widget/markdown/streaming/reveal_fx.cpp
-    src/widget/markdown/streaming/folding.cpp
-    src/widget/markdown/streaming/async.cpp
+    src/widget/agentty/markdown/streaming/markdown_memo.cpp
+    src/widget/agentty/markdown/streaming/boundary.cpp
+    src/widget/agentty/markdown/streaming/commit.cpp
+    src/widget/agentty/markdown/streaming/render_tail.cpp
+    src/widget/agentty/markdown/streaming/build.cpp
+    src/widget/agentty/markdown/streaming/reveal_fx.cpp
+    src/widget/agentty/markdown/streaming/folding.cpp
+    src/widget/agentty/markdown/streaming/async.cpp
 
-    src/widget/html/tags.cpp
-    src/widget/html/tokenizer.cpp
-    src/widget/html/parser.cpp
-    src/widget/html/css.cpp
-    src/widget/html/render.cpp
+    src/widget/agentty/html/tags.cpp
+    src/widget/agentty/html/tokenizer.cpp
+    src/widget/agentty/html/parser.cpp
+    src/widget/agentty/html/css.cpp
+    src/widget/agentty/html/render.cpp
 )
 
 # ── jaal, and the one decision of what the platform is ────────────────────────

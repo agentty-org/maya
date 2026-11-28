@@ -1,6 +1,6 @@
 // Tests for maya style system: Style attributes, SGR generation, merge, operator|
 #include <maya/maya.hpp>
-#include <maya/widget/markdown.hpp>   // markdown_palette_from
+#include <maya/widget/agentty/markdown.hpp>   // markdown_palette_from
 #include <maya/style/schemes.hpp>       // theme::schemes
 // NDEBUG guard: CMake builds tests in Release (-O3 -DNDEBUG), which strips
 // assert(). Undefine it here so this file's runtime asserts actually fire.

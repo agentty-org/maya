@@ -1,7 +1,7 @@
 // test_math.cpp — coverage for the LaTeX math markdown extension.
 //
 // Two layers:
-//   1. The standalone TeX typesetter (widget/markdown/tex_math.hpp): assert on
+//   1. The standalone TeX typesetter (widget/agentty/markdown/tex_math.hpp): assert on
 //      the exact typeset cell grid for representative formulae — deterministic,
 //      no layout engine involved.
 //   2. Integration: `$…$`, `\(…\)`, `$$…$$` and ```math fences flow through the
@@ -14,8 +14,8 @@
 
 #include "check.hpp"
 
-#include "maya/widget/markdown/tex_math.hpp"
-#include "maya/widget/markdown.hpp"
+#include "maya/widget/agentty/markdown/tex_math.hpp"
+#include "maya/widget/agentty/markdown.hpp"
 #include "maya/text/unicode_width.hpp"
 #include "maya/render/canvas.hpp"
 #include "maya/render/renderer.hpp"

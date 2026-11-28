@@ -23,10 +23,10 @@
 #include <maya/widget/error_block.hpp>
 #include <maya/widget/file_changes.hpp>
 #include <maya/widget/git_status.hpp>
-#include <maya/widget/markdown.hpp>
+#include <maya/widget/agentty/markdown.hpp>
 #include <maya/widget/message.hpp>
-#include <maya/widget/model_badge.hpp>
-#include <maya/widget/permission.hpp>
+#include <maya/widget/agentty/model_badge.hpp>
+#include <maya/widget/agentty/permission.hpp>
 #include <maya/widget/read_tool.hpp>
 #include <maya/widget/streaming_cursor.hpp>
 #include <maya/widget/system_banner.hpp>

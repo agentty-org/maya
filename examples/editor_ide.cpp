@@ -14,7 +14,7 @@
 #include <maya/widget/git_blame_gutter.hpp>
 #include <maya/widget/overview_ruler.hpp>
 #include <maya/widget/symbol_outline.hpp>
-#include <maya/widget/completion_menu.hpp>
+#include <maya/widget/agentty/completion_menu.hpp>
 #include <maya/widget/editor_tab_bar.hpp>
 #include <maya/widget/breadcrumb_bar.hpp>
 #include <maya/widget/editor_status_line.hpp>
