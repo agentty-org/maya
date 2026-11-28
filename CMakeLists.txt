@@ -251,6 +251,7 @@ set(MAYA_LIB_SOURCES
     src/render/scrollback_ledger.cpp
     src/render/scrollback_replay.cpp
     src/widget/agentty/panel.cpp
+    src/widget/agentty/report.cpp
     # markdown widget — three modules: parser / render / streaming
     # (component layout: src/widget/agentty/markdown/LAYOUT.md)
     src/widget/agentty/markdown/parser/parser_inline.cpp
@@ -715,6 +716,7 @@ if(MAYA_BUILD_TESTS)
         tests/test_color_tier_consistency.cpp
         tests/test_widgets.cpp
         tests/tab_strip_test.cpp
+        tests/agentty_widgets_test.cpp
         tests/stat_sheet_test.cpp
         tests/test_spacing_invariants.cpp
         tests/test_promoted.cpp

@@ -108,6 +108,93 @@ public:
     explicit ToolViewer(Config c) : cfg_(std::move(c)) {}
     operator Element() const { return build(); }
 
+    // One row of tool output as a fill span: `base` colour, output tokens
+    // (paths, URLs, ok/error words) on top when `tokens`, then the find
+    // hits (byte ranges into `s`) on top of everything.
+    [[nodiscard]] static Span output_span(std::string_view s, Style base, bool tokens,
+                                          const std::vector<std::pair<std::size_t, std::size_t>>& hits = {}) {
+        Span out{std::string{s}, base};
+        out.fill = true;
+        if (!tokens && hits.empty()) return out;
+        // A hit is the warning ink drawn INVERSE: the terminal swaps it into
+        // the cell background, so it reads as a solid amber block on any
+        // theme polarity without naming an ink slot as a background.
+        const Style hit_st = Style{}.with_fg(Color::slot(ThemeSlot::Warning))
+                                    .with_inverse().with_bold();
+        std::vector<Style> per(s.size(), base);
+        if (tokens)
+            for (const auto& r : ToolBodyPreview::output_tokens(s)) {
+                const auto end = std::min(s.size(), r.byte_offset + r.byte_length);
+                for (auto k = r.byte_offset; k < end; ++k) {
+                    Style st = per[k];
+                    if (r.style.fg) st.fg = r.style.fg;
+                    st.bold = st.bold || r.style.bold;
+                    st.underline = r.style.underline;
+                    per[k] = st;
+                }
+            }
+        for (auto [off, len] : hits)
+            for (auto k = off; k < std::min(s.size(), off + len); ++k) per[k] = hit_st;
+        out.runs = runs_of(per, 0, per.size());
+        return out;
+    }
+
+    // Inline markdown in a report line: `s` becomes plain text plus one
+    // style per byte -- **bold** in `strong`, `code` in `code`, delimiters
+    // dropped. A lone `**` (`docs/**`) is content and stays.
+    struct Marked { std::string plain; std::vector<Style> styles; };
+    [[nodiscard]] static Marked inline_markdown(std::string_view s, Style base, Style strong, Style code) {
+        Marked m;
+        m.plain.reserve(s.size());
+        m.styles.reserve(s.size());
+        for (std::size_t i = 0; i < s.size();) {
+            if (s[i] == '`') {
+                if (auto close = s.find('`', i + 1); close != std::string_view::npos && close > i + 1) {
+                    for (auto k = i + 1; k < close; ++k) { m.plain += s[k]; m.styles.push_back(code); }
+                    i = close + 1;
+                    continue;
+                }
+            }
+            if (s.compare(i, 2, "**") == 0) {
+                if (auto close = s.find("**", i + 2); close != std::string_view::npos && close > i + 2
+                    && s[i + 2] != ' ' && s[close - 1] != ' ') {
+                    for (auto k = i + 2; k < close; ++k)
+                        if (s[k] != '`') { m.plain += s[k]; m.styles.push_back(strong); }
+                    i = close + 2;
+                    continue;
+                }
+            }
+            m.plain += s[i++];
+            m.styles.push_back(base);
+        }
+        return m;
+    }
+
+    // A slice [off, off+len) of a Marked line as a fill span.
+    [[nodiscard]] static Span marked_span(const Marked& m, std::size_t off, std::size_t len, Style base) {
+        Span out{m.plain.substr(off, len), base};
+        out.fill = true;
+        out.runs = runs_of(m.styles, off, len);
+        return out;
+    }
+
+private:
+    // Per-byte styles [off, off+len) folded into runs relative to `off`.
+    [[nodiscard]] static std::vector<StyledRun> runs_of(const std::vector<Style>& per,
+                                                        std::size_t off, std::size_t len) {
+        std::vector<StyledRun> runs;
+        const std::size_t end = std::min(per.size(), off + len);
+        for (std::size_t k = off; k < end;) {
+            std::size_t j = k + 1;
+            while (j < end && per[j] == per[k]) ++j;
+            runs.push_back({k - off, j - k, per[k]});
+            k = j;
+        }
+        return runs;
+    }
+
+public:
+
     // A structured preview (diff, file, todo) split into one-row elements,
     // so the viewer's window can address rows and the scroll stays exact.
     [[nodiscard]] static std::vector<Element> preview_rows(ToolBodyPreview::Config bp) {
