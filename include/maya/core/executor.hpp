@@ -11,6 +11,23 @@
 //
 // With nothing installed (a bare renderer, a unit test), work runs inline on
 // the caller. That's slower, never wrong: both callers are correct serially.
+//
+// FOR VIEW CODE ONLY. Two properties make it the wrong tool anywhere else:
+//
+//   * it is installed only inside maya::run. A host that never calls it --
+//     an RPC server, a CLI verb, a batch tool, a test -- runs every call on
+//     one thread, and nothing says so. Parallelism that matters outside the
+//     TUI silently isn't there.
+//   * it takes no capability. parallel_for blocks on helper threads, and a
+//     blocking wait under a lock is the one thing the rank system exists to
+//     refuse; this call can't be refused, because the compiler can't see it.
+//
+// Its code also lives in libmaya, the renderer, so a target that links only
+// maya::runtime compiles a call and fails to link it.
+//
+// Anything that isn't drawing -- I/O, parsing, indexing -- wants
+// maya::parallel_for(cap, n, width, body) from <maya/runtime.hpp>: jaal's,
+// the same in every process, and it needs `const unlocked&`.
 
 #include <cstddef>
 #include <functional>
